@@ -12,3 +12,9 @@ cmake -G Ninja -B iree-build -S 3rdparty/iree \
     -DIREE_ENABLE_LLD=ON
 
 cmake --build iree-build
+
+(
+	cd 3rdparty/tosa-converter-for-tflite
+	pip wheel .
+	mv *.whl ../..
+)

@@ -1,3 +1,6 @@
 [submodule "3rdparty/iree"]
 	path = 3rdparty/iree
 	url = https://github.com/iree-org/iree.git
+[submodule "3rdparty/tosa-converter-for-tflite"]
+	path = 3rdparty/tosa-converter-for-tflite
+	url = https://gitlab.arm.com/tosa/tosa-converter-for-tflite.git
