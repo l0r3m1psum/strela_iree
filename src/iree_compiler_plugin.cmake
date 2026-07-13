@@ -5,7 +5,12 @@ iree_cc_library(
     "${CMAKE_CURRENT_LIST_DIR}/my_plugin.cc"
   DEPS
     MLIRIR
+    MLIRPass
+    MLIRTransforms
+    MLIRFuncDialect
+    MLIRLinalgDialect
     iree::compiler::PluginAPI
+    iree::compiler::Codegen::Dialect::Codegen::IR::IREECodegenDialect
   PUBLIC
 )
 
