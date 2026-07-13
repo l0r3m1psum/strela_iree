@@ -3,6 +3,7 @@
 set -e
 
 cmake -G Ninja -B iree-build -S 3rdparty/iree \
+    -DIREE_CMAKE_PLUGIN_PATHS="${PWD}/src" \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DIREE_ENABLE_ASSERTIONS=ON \
     -DIREE_ENABLE_SPLIT_DWARF=ON \
@@ -16,5 +17,6 @@ cmake --build iree-build
 (
 	cd 3rdparty/tosa-converter-for-tflite
 	pip wheel .
-	mv *.whl ../..
+	mv "tosa_converter_for_tflite-*.whl" ../..
+	pip install "tosa_converter_for_tflite-*.whl"
 )
