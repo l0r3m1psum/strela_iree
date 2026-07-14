@@ -10,7 +10,7 @@ fi
 
 model_path="$1"
 tosa-converter-for-tflite "$model_path" --text \
-	| sed 's/DOUBLE_ROUND/SINGLE_ROUND/g; s/?x/1x/g' >ad01_int8.mlir
+	| sed 's/?x/1x/g' >ad01_int8.mlir
 
 iree-opt --mlir-elide-elementsattrs-if-larger=16 ad01_int8.mlir
 

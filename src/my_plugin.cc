@@ -1,10 +1,10 @@
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenDialect.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenOps.h"
-#include "iree/compiler/Codegen/Dialect/Codegen/IR/UKernelOps.h"
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/PluginAPI/Client.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Tosa/IR/TosaOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -195,19 +195,6 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
   }
 };
 
-struct SpyPattern : public RewritePattern {
-  SpyPattern(MLIRContext *context)
-      : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context) {}
-
-  LogicalResult matchAndRewrite(Operation *op, PatternRewriter &rewriter) const override {
-    if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-      linalgOp->emitRemark("I am a Linalg Op: ") << linalgOp->getName();
-    }
-
-    return failure();
-  }
-};
-
 // NOTE: should OperationPass<T> be OperationPass<ModuleOp>?
 struct MyFusionPass : public PassWrapper<MyFusionPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MyFusionPass)
@@ -228,7 +215,62 @@ struct MyFusionPass : public PassWrapper<MyFusionPass, OperationPass<func::FuncO
       signalPassFailure();
     }
 
-    funcOp->getParentOfType<ModuleOp>().print(llvm::errs());
+    mlir::OpPrintingFlags flags;
+    flags.elideLargeElementsAttrs(16);
+    funcOp->getParentOfType<ModuleOp>().print(llvm::errs(), flags);
+  }
+};
+
+struct DoubleRoundRewriter : public OpRewritePattern<tosa::RescaleOp> {
+  using OpRewritePattern<tosa::RescaleOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+    tosa::RescaleOp rescaleOp,
+    PatternRewriter& rewriter
+  ) const override {
+
+    if (rescaleOp.getRoundingMode() != mlir::tosa::RoundingMode::DOUBLE_ROUND) {
+      return failure();
+    }
+
+    rescaleOp.emitWarning("Converting from DOUBLE_ROUND to SINGLE_ROUND");
+
+    rewriter.modifyOpInPlace(rescaleOp, [&]() {
+      rescaleOp->setAttr(
+        "rounding_mode",
+        mlir::tosa::RoundingModeAttr::get(
+          rewriter.getContext(),
+          mlir::tosa::RoundingMode::SINGLE_ROUND
+        )
+      );
+    });
+
+    return success();
+  }
+};
+
+struct MyRewritePass : public PassWrapper<MyRewritePass, OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MyRewritePass)
+
+  StringRef getArgument() const override { return "iree-example2-rewrite-pass"; }
+  StringRef getDescription() const override { return "Rewrites sruff"; }
+
+  void runOnOperation() override {
+    func::FuncOp funcOp = getOperation();
+    mlir::MLIRContext *context = &getContext();
+    llvm::errs() << "DEBUG: MyRewritePass is running on operation: "
+               << funcOp.getName() << "\n";
+    RewritePatternSet patterns(context);
+    patterns.add<DoubleRoundRewriter>(context);
+
+    GreedyRewriteConfig config;
+    if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
+      signalPassFailure();
+    }
+
+    mlir::OpPrintingFlags flags;
+    flags.elideLargeElementsAttrs(16);
+    funcOp->getParentOfType<ModuleOp>().print(llvm::errs(), flags);
   }
 };
 
@@ -243,6 +285,14 @@ struct MyOptions {
 };
 
 struct MySession : public PluginSession<MySession, MyOptions> {
+
+  void extendInputConversionPreprocessingPassPipeline(
+    OpPassManager &passManager,
+    InputDialectOptions::Type inputType
+  ) override {
+    passManager.addNestedPass<func::FuncOp>(std::make_unique<MyRewritePass>());
+  }
+
   bool extendCustomInputConversionPassPipeline(
     OpPassManager& pm,
     std::string_view typeMnemonic

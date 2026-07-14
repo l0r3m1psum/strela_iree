@@ -8,6 +8,7 @@ iree_cc_library(
     MLIRPass
     MLIRTransforms
     MLIRFuncDialect
+    MLIRTosaDialect
     MLIRLinalgDialect
     iree::compiler::PluginAPI
     iree::compiler::Codegen::Dialect::Codegen::IR::IREECodegenDialect
