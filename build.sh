@@ -14,6 +14,11 @@ cmake -G Ninja -B iree-build -S 3rdparty/iree \
 
 cmake --build iree-build
 
+cmake -G Ninja -S src -B build \
+    -DIREERuntime_DIR="${PWD}/iree-build/lib/cmake/IREE"
+
+cmake --build build
+
 (
 	cd 3rdparty/tosa-converter-for-tflite
 	pip wheel .

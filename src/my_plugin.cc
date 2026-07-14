@@ -1,6 +1,7 @@
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenDialect.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenOps.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/UKernelOps.h"
+#include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/PluginAPI/Client.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -55,6 +56,16 @@ isMatmulEquivalent(linalg::Conv2DNhwcHwcfQOp convOp) {
   return success();
 }
 
+static Type
+getDynamicTensorType(Type t) {
+  if (auto rankedType = dyn_cast<RankedTensorType>(t)) {
+    SmallVector<int64_t> dynShape(rankedType.getRank(), ShapedType::kDynamic);
+    return RankedTensorType::get(dynShape, rankedType.getElementType());
+  }
+  // TODO: assert that it is a scalar...
+  return t;
+}
+
 struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
   using OpRewritePattern<linalg::Conv2DNhwcHwcfQOp>::OpRewritePattern;
 
@@ -73,20 +84,112 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
     Value w = convOp.getDpsInputOperand(1)->get();
     Value z_x = convOp.getDpsInputOperand(2)->get();
     Value z_w = convOp.getDpsInputOperand(3)->get();
+    Value y = convOp.getDpsInits()[0];
 
-    auto ukernel = IREE::Codegen::UKernelGenericOp::create(
-        rewriter,
-        convOp.getLoc(),
-        convOp.getResultTypes(),
-        rewriter.getStringAttr("my_centered_gemm"),
-        ValueRange{x, z_x, w, z_w},
-        convOp.getDpsInits(),
-        ValueRange{},
-        /*fn_def_attrs=*/nullptr,
-        /*strided_outer_dims=*/nullptr
-    );
+    ModuleOp moduleOp = convOp->getParentOfType<ModuleOp>();
+    Location loc = convOp.getLoc();
 
-    rewriter.replaceOp(convOp, ukernel.getResults());
+    {
+      static int next_kernel_id = 0; // Simple global ID counter
+      int current_kernel_id = next_kernel_id++;
+
+      std::vector<uint8_t> myKernelBinary = {0,1,2,3};
+
+      auto kernelTensorType = RankedTensorType::get(
+          {static_cast<int64_t>(myKernelBinary.size())},
+          rewriter.getI8Type()
+      );
+
+      StringRef initFuncName = "custom.init_accelerator";
+      auto initFuncDecl = moduleOp.lookupSymbol<func::FuncOp>(initFuncName);
+      if (!initFuncDecl) {
+          OpBuilder::InsertionGuard guard(rewriter);
+          rewriter.setInsertionPointToStart(moduleOp.getBody());
+
+          auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
+          auto initFuncType = rewriter.getFunctionType(
+              {rewriter.getI32Type(), unrankedTensorType}, {}
+          );
+          initFuncDecl = func::FuncOp::create(rewriter, loc, initFuncName, initFuncType);
+          initFuncDecl.setPrivate();
+      }
+
+      // TODO: the parameters for a kernel are z_x and z_w together with the
+      // delay to accumulate a resulting vector.
+      {
+          // Save insertion point so we don't mess up the convOp replacement
+          OpBuilder::InsertionGuard guard(rewriter);
+          // Initializers usually go at the end of the module
+          rewriter.setInsertionPointToEnd(moduleOp.getBody());
+
+          auto initOp = IREE::Util::InitializerOp::create(rewriter, loc);
+          // createBlock automatically moves the insertion point inside the block
+          rewriter.createBlock(&initOp.getBody());
+
+          Value idVal = arith::ConstantIntOp::create(rewriter, loc, current_kernel_id, 32);
+
+          auto denseAttr = DenseElementsAttr::get(kernelTensorType, ArrayRef(myKernelBinary));
+          Value kernelBlob = arith::ConstantOp::create(rewriter, loc, kernelTensorType, denseAttr);
+
+          auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
+          Value castedBlob = tensor::CastOp::create(rewriter, loc, unrankedTensorType, kernelBlob);
+          func::CallOp::create(rewriter, loc, initFuncDecl, ValueRange{idVal, castedBlob});
+          IREE::Util::ReturnOp::create(rewriter, loc);
+      }
+
+    }
+
+    // TODO: this function should take the kernel ID as input or some more type-safe thing...
+    StringRef gemmFuncName = "custom.my_centered_gemm";
+
+    auto funcDecl = moduleOp.lookupSymbol<func::FuncOp>(gemmFuncName);
+    SmallVector<Type> inputTypes = {
+        x.getType(), z_x.getType(), w.getType(), z_w.getType(), y.getType()
+    };
+    TypeRange resultTypes = convOp.getResultTypes();
+
+    SmallVector<Type> dynamicInputTypes;
+    for (Type t : inputTypes) dynamicInputTypes.push_back(getDynamicTensorType(t));
+
+    SmallVector<Type> dynamicResultTypes;
+    for (Type t : resultTypes) dynamicResultTypes.push_back(getDynamicTensorType(t));
+
+    if (!funcDecl) {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(moduleOp.getBody());
+
+      auto funcType = rewriter.getFunctionType(dynamicInputTypes, dynamicResultTypes);
+      funcDecl = func::FuncOp::create(rewriter, loc, gemmFuncName, funcType);
+      // Must be set as private to signify it's an externally resolved symbol
+      funcDecl.setPrivate();
+    }
+
+    SmallVector<Value> originalOperands = {x, z_x, w, z_w, y};
+    SmallVector<Value> castedOperands;
+    for (size_t i = 0; i < originalOperands.size(); ++i) {
+      if (originalOperands[i].getType() != dynamicInputTypes[i]) {
+        castedOperands.push_back(tensor::CastOp::create(
+          rewriter, convOp.getLoc(), dynamicInputTypes[i], originalOperands[i])
+        );
+      } else {
+        castedOperands.push_back(originalOperands[i]);
+      }
+    }
+
+    auto callOp = func::CallOp::create(rewriter, loc, funcDecl, castedOperands);
+
+    SmallVector<Value> castedResults;
+    for (size_t i = 0; i < callOp.getNumResults(); ++i) {
+      if (callOp.getResult(i).getType() != resultTypes[i]) {
+        castedResults.push_back(tensor::CastOp::create(
+          rewriter, convOp.getLoc(), resultTypes[i], callOp.getResult(i))
+        );
+      } else {
+        castedResults.push_back(callOp.getResult(i));
+      }
+    }
+
+    rewriter.replaceOp(convOp, castedResults);
 
     return success();
   }
@@ -105,6 +208,7 @@ struct SpyPattern : public RewritePattern {
   }
 };
 
+// NOTE: should OperationPass<T> be OperationPass<ModuleOp>?
 struct MyFusionPass : public PassWrapper<MyFusionPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MyFusionPass)
 
@@ -112,16 +216,19 @@ struct MyFusionPass : public PassWrapper<MyFusionPass, OperationPass<func::FuncO
   StringRef getDescription() const override { return "Fuses centering subtractions into a GEMM ukernel"; }
 
   void runOnOperation() override {
-    llvm::errs() << "DEBUG: MyFusionPass is running on operation: "
-               << getOperation().getName() << "\n";
+    func::FuncOp funcOp = getOperation();
     mlir::MLIRContext *context = &getContext();
+    llvm::errs() << "DEBUG: MyFusionPass is running on operation: "
+               << funcOp.getName() << "\n";
     RewritePatternSet patterns(context);
     patterns.add<Conv2DOffload>(context);
 
     GreedyRewriteConfig config;
-    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns), config))) {
+    if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
       signalPassFailure();
     }
+
+    funcOp->getParentOfType<ModuleOp>().print(llvm::errs());
   }
 };
 
