@@ -26,4 +26,4 @@ iree-run-module \
 	--module=build/libcustom_module.so \
 	--module=ad01_int8.vmfb \
 	--function=main \
-	--input="1x640xi8=0"
+	--input="2x640xi8=0"
