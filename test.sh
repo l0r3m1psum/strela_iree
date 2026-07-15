@@ -9,8 +9,7 @@ then
 fi
 
 model_path="$1"
-tosa-converter-for-tflite "$model_path" --text \
-	| sed 's/?x/1x/g' >ad01_int8.mlir
+tosa-converter-for-tflite "$model_path" --text >ad01_int8.mlir
 
 iree-opt --mlir-elide-elementsattrs-if-larger=16 ad01_int8.mlir
 
