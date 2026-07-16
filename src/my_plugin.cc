@@ -99,45 +99,45 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       std::vector<uint8_t> myKernelBinary = {0,1,2,3};
 
       auto kernelTensorType = RankedTensorType::get(
-          {static_cast<int64_t>(myKernelBinary.size())},
-          rewriter.getI8Type()
+        {static_cast<int64_t>(myKernelBinary.size())},
+        rewriter.getI8Type()
       );
 
       StringRef initFuncName = "custom.init_accelerator";
       auto initFuncDecl = moduleOp.lookupSymbol<func::FuncOp>(initFuncName);
       if (!initFuncDecl) {
-          OpBuilder::InsertionGuard guard(rewriter);
-          rewriter.setInsertionPointToStart(moduleOp.getBody());
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPointToStart(moduleOp.getBody());
 
-          auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
-          auto initFuncType = rewriter.getFunctionType(
-              {rewriter.getI32Type(), unrankedTensorType}, {}
-          );
-          initFuncDecl = func::FuncOp::create(rewriter, loc, initFuncName, initFuncType);
-          initFuncDecl.setPrivate();
+        auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
+        auto initFuncType = rewriter.getFunctionType(
+          {rewriter.getI32Type(), unrankedTensorType}, {}
+        );
+        initFuncDecl = func::FuncOp::create(rewriter, loc, initFuncName, initFuncType);
+        initFuncDecl.setPrivate();
       }
 
       // TODO: the parameters for a kernel are z_x and z_w together with the
       // delay to accumulate a resulting vector.
       {
-          // Save insertion point so we don't mess up the convOp replacement
-          OpBuilder::InsertionGuard guard(rewriter);
-          // Initializers usually go at the end of the module
-          rewriter.setInsertionPointToEnd(moduleOp.getBody());
+        // Save insertion point so we don't mess up the convOp replacement
+        OpBuilder::InsertionGuard guard(rewriter);
+        // Initializers usually go at the end of the module
+        rewriter.setInsertionPointToEnd(moduleOp.getBody());
 
-          auto initOp = IREE::Util::InitializerOp::create(rewriter, loc);
-          // createBlock automatically moves the insertion point inside the block
-          rewriter.createBlock(&initOp.getBody());
+        auto initOp = IREE::Util::InitializerOp::create(rewriter, loc);
+        // createBlock automatically moves the insertion point inside the block
+        rewriter.createBlock(&initOp.getBody());
 
-          Value idVal = arith::ConstantIntOp::create(rewriter, loc, current_kernel_id, 32);
+        Value idVal = arith::ConstantIntOp::create(rewriter, loc, current_kernel_id, 32);
 
-          auto denseAttr = DenseElementsAttr::get(kernelTensorType, ArrayRef(myKernelBinary));
-          Value kernelBlob = arith::ConstantOp::create(rewriter, loc, kernelTensorType, denseAttr);
+        auto denseAttr = DenseElementsAttr::get(kernelTensorType, ArrayRef(myKernelBinary));
+        Value kernelBlob = arith::ConstantOp::create(rewriter, loc, kernelTensorType, denseAttr);
 
-          auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
-          Value castedBlob = tensor::CastOp::create(rewriter, loc, unrankedTensorType, kernelBlob);
-          func::CallOp::create(rewriter, loc, initFuncDecl, ValueRange{idVal, castedBlob});
-          IREE::Util::ReturnOp::create(rewriter, loc);
+        auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
+        Value castedBlob = tensor::CastOp::create(rewriter, loc, unrankedTensorType, kernelBlob);
+        func::CallOp::create(rewriter, loc, initFuncDecl, ValueRange{idVal, castedBlob});
+        IREE::Util::ReturnOp::create(rewriter, loc);
       }
 
     }
@@ -147,7 +147,7 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
 
     auto funcDecl = moduleOp.lookupSymbol<func::FuncOp>(gemmFuncName);
     SmallVector<Type> inputTypes = {
-        x.getType(), z_x.getType(), w.getType(), z_w.getType(), y.getType()
+      x.getType(), z_x.getType(), w.getType(), z_w.getType(), y.getType()
     };
     TypeRange resultTypes = convOp.getResultTypes();
 
