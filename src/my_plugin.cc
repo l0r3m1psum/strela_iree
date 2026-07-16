@@ -17,6 +17,44 @@ using namespace mlir::iree_compiler;
 
 namespace {
 
+/*
+ * +--+--+--+--+
+ * | 0| 1| 2| 3|
+ * +--+--+--+--+
+ * | 4| 5| 6| 7|
+ * +--+--+--+--+
+ * | 8| 9|10|11|
+ * +--+--+--+--+
+ * |12|13|14|15|
+ * +--+--+--+--+
+ */
+// Constants are -1=0xFFFFFFFF and delays are set to 0xDDEE
+// row_major[] = {}
+// kernel[5*(3+0) + 4] = z_x
+// kernel[5*(3+4) + 4] = kernel[5*(3+8) + 4] = kernel[5*(3+12) + 4] = z_w
+// kernel[5*(5+0) + 2] = kernel[5*(5+4) + 2] = kernel[5*(5+8)  + 2] = (x_rows << 16) | 0x0080
+[[maybe_unused]] static uint32_t centered_matmul_kernel[] = {
+  0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
+  0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
+  0x00000041, 0x02000000, 0x00000000, 0x00000000, 0x00000000, // 4
+  0x00000201, 0x02040300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 0
+
+  0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 13
+  0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 9
+  0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 5
+  0x00000201, 0x02040300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 1
+
+  0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 14
+  0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 10
+  0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 6
+  0x00000201, 0x02040300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 2
+
+  0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 15
+  0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 11
+  0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 7
+  0x00000201, 0x02040300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 3
+};
+
 static LogicalResult
 isMatmulEquivalent(linalg::Conv2DNhwcHwcfQOp convOp) {
   Value x = convOp.getDpsInputOperand(0)->get();
@@ -426,8 +464,11 @@ struct MySession : public PluginSession<MySession, MyOptions> {
       llvm::errs()
         << "Custom input conversion pass pipeline type: "
         << typeMnemonic << "\n";
-      pm.addNestedPass<func::FuncOp>(std::make_unique<MyFusionPass>());
-      bool extensionsWereMade = true;
+      bool extensionsWereMade = false;
+      if (options.enable_fusion) {
+        pm.addNestedPass<func::FuncOp>(std::make_unique<MyFusionPass>());
+        extensionsWereMade = true;
+      }
       return extensionsWereMade;
   }
 };

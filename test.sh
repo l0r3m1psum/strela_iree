@@ -4,7 +4,7 @@ set -e
 
 if [ -z "$1" ]
 then
-	echo "Missing path to .tflite file" >&2
+	echo "Missing path to ad01_int8.tflite file" >&2
 	exit 1
 fi
 
