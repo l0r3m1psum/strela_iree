@@ -69,7 +69,7 @@ class CustomModule final : public vm::NativeModule<CustomModuleState> {
   }
 };
 
-extern "C" IREE_API_EXPORT iree_status_t
+IREE_API_EXPORT iree_status_t
 iree_vm_dynamic_module_create(
   uint32_t max_version,
   iree_vm_instance_t* instance,

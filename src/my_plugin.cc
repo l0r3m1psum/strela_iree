@@ -271,7 +271,7 @@ struct DynamicBatchRewriter : public OpRewritePattern<tosa::RescaleOp> {
       return failure();
     }
 
-    rescaleOp.emitWarning("Lowering dynamic batch to an scf.for loop");
+    rescaleOp.emitRemark("Lowering dynamic batch to an scf.for loop");
 
     Location loc = rescaleOp.getLoc();
     int64_t rank = inputType.getRank();

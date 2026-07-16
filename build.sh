@@ -35,6 +35,12 @@ cmake -G Ninja -S src -B build \
 
 cmake --build build
 
+cmake -G Ninja -S src -B build-arm \
+    -DCMAKE_TOOLCHAIN_FILE="${PWD}/src/arm_toolchain.cmake" \
+    -DIREERuntime_DIR="${PWD}/iree-build-arm/lib/cmake/IREE"
+
+cmake --build build-arm
+
 (
 	cd 3rdparty/tosa-converter-for-tflite
 	pip wheel .
