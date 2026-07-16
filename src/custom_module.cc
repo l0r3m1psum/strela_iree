@@ -15,12 +15,34 @@ class CustomModuleState final {
 
   StatusOr<vm::ref<iree_hal_buffer_view_t>>
   MyCenteredGemm(
+    int32_t kernel_handle,
     vm::ref<iree_hal_buffer_view_t> x,
     int32_t z_x,
     vm::ref<iree_hal_buffer_view_t> w,
     int32_t z_w,
     vm::ref<iree_hal_buffer_view_t> y
   ) {
+
+    /*
+     * The STRELA kernel multiplies 3 rows of A with one column of B in single
+     * execution. As shown below. Of course doing A B' is more efficient because
+     * we an load from B with "unit" stride.
+     *
+     *          A              B
+     * [ --------------- ] [ |     ]
+     * [ --------------- ] [ |     ]
+     * [ --------------- ] [ |     ]
+     * [                 ] [ |     ]
+     * [                 ] [ |     ]
+     */
+
+    // TODO: verify that the delays and zero points are correct. The delay
+    // should be the number of rows in B
+
+    // strela_config(dev, kernel, &conf);
+    // The previous line must be looped.
+
+    std::cerr << "handle " << kernel_handle << ' ';
 
     iree_hal_buffer_view_t* x_view = x.get();
     iree_host_size_t rank = iree_hal_buffer_view_shape_rank(x_view);
@@ -35,14 +57,18 @@ class CustomModuleState final {
     return y;
   }
 
-  Status
+  StatusOr<int32_t>
   InitAccelerator(
-    int32_t id,
     vm::ref<iree_hal_buffer_view_t> kernel
   ) {
 
+    // strela_kernel kernel = strela_kernel_alloc(dev);
+    // strela_kernel_set(dev, kernel, bypass_kernel);
+    // TODO: this function should return the handle from STRELA or an error.
+    static int32_t i = 0;
     std::cerr << "init\n";
-    return OkStatus();
+
+    return i++;
   }
 
  private:

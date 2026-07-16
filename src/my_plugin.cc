@@ -91,63 +91,78 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
 
     ModuleOp moduleOp = convOp->getParentOfType<ModuleOp>();
     Location loc = convOp.getLoc();
+    Type i32 = rewriter.getI32Type();
 
-    {
-      static int next_kernel_id = 0; // Simple global ID counter
-      int current_kernel_id = next_kernel_id++;
+    SymbolTable symbolTable(moduleOp);
 
-      std::vector<uint8_t> myKernelBinary = {0,1,2,3};
+    std::vector<uint8_t> myKernelBinary = {0,1,2,3};
+    auto kernelTensorType = RankedTensorType::get(
+      {static_cast<int64_t>(myKernelBinary.size())},
+      rewriter.getI8Type()
+    );
 
-      auto kernelTensorType = RankedTensorType::get(
-        {static_cast<int64_t>(myKernelBinary.size())},
-        rewriter.getI8Type()
+    StringRef initFuncName = "custom.init_accelerator";
+    auto initFuncDecl = moduleOp.lookupSymbol<func::FuncOp>(initFuncName);
+    if (!initFuncDecl) {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(moduleOp.getBody());
+
+      auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
+      Type i32 = rewriter.getI32Type();
+      auto initFuncType = rewriter.getFunctionType(
+        {unrankedTensorType}, {i32}
       );
+      initFuncDecl = func::FuncOp::create(rewriter, loc, initFuncName, initFuncType);
+      initFuncDecl.setPrivate();
 
-      StringRef initFuncName = "custom.init_accelerator";
-      auto initFuncDecl = moduleOp.lookupSymbol<func::FuncOp>(initFuncName);
-      if (!initFuncDecl) {
-        OpBuilder::InsertionGuard guard(rewriter);
-        rewriter.setInsertionPointToStart(moduleOp.getBody());
-
-        auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
-        auto initFuncType = rewriter.getFunctionType(
-          {rewriter.getI32Type(), unrankedTensorType}, {}
-        );
-        initFuncDecl = func::FuncOp::create(rewriter, loc, initFuncName, initFuncType);
-        initFuncDecl.setPrivate();
-      }
-
-      // TODO: the parameters for a kernel are z_x and z_w together with the
-      // delay to accumulate a resulting vector.
-      {
-        // Save insertion point so we don't mess up the convOp replacement
-        OpBuilder::InsertionGuard guard(rewriter);
-        // Initializers usually go at the end of the module
-        rewriter.setInsertionPointToEnd(moduleOp.getBody());
-
-        auto initOp = IREE::Util::InitializerOp::create(rewriter, loc);
-        // createBlock automatically moves the insertion point inside the block
-        rewriter.createBlock(&initOp.getBody());
-
-        Value idVal = arith::ConstantIntOp::create(rewriter, loc, current_kernel_id, 32);
-
-        auto denseAttr = DenseElementsAttr::get(kernelTensorType, ArrayRef(myKernelBinary));
-        Value kernelBlob = arith::ConstantOp::create(rewriter, loc, kernelTensorType, denseAttr);
-
-        auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
-        Value castedBlob = tensor::CastOp::create(rewriter, loc, unrankedTensorType, kernelBlob);
-        func::CallOp::create(rewriter, loc, initFuncDecl, ValueRange{idVal, castedBlob});
-        IREE::Util::ReturnOp::create(rewriter, loc);
-      }
-
+      symbolTable.insert(initFuncDecl);
     }
 
-    // TODO: this function should take the kernel ID as input or some more type-safe thing...
+    IREE::Util::GlobalOp globalDecl;
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(moduleOp.getBody());
+
+      StringRef globalName = "kernel_handle";
+      bool isMutable = true;
+      globalDecl = IREE::Util::GlobalOp::create(
+        rewriter, loc, globalName, isMutable, i32
+      );
+      globalDecl.setPrivate();
+
+      symbolTable.insert(globalDecl);
+    }
+
+    // TODO: the parameters for a kernel are z_x and z_w together with the
+    // delay to accumulate a resulting vector.
+    {
+      // Save insertion point so we don't mess up the convOp replacement
+      OpBuilder::InsertionGuard guard(rewriter);
+      // Initializers usually go at the end of the module
+      rewriter.setInsertionPointToEnd(moduleOp.getBody());
+
+      auto initOp = IREE::Util::InitializerOp::create(rewriter, loc);
+      // createBlock automatically moves the insertion point inside the block
+      rewriter.createBlock(&initOp.getBody());
+
+      auto denseAttr = DenseElementsAttr::get(kernelTensorType, ArrayRef(myKernelBinary));
+      Value kernelBlob = arith::ConstantOp::create(rewriter, loc, kernelTensorType, denseAttr);
+
+      auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
+      Value castedBlob = tensor::CastOp::create(rewriter, loc, unrankedTensorType, kernelBlob);
+      auto callOp = func::CallOp::create(rewriter, loc, initFuncDecl, ValueRange{castedBlob});
+
+      Value callResult = callOp.getResult(0);
+      IREE::Util::GlobalStoreOp::create(rewriter, loc, callResult, globalDecl);
+
+      IREE::Util::ReturnOp::create(rewriter, loc);
+    }
+
     StringRef gemmFuncName = "custom.my_centered_gemm";
 
     auto funcDecl = moduleOp.lookupSymbol<func::FuncOp>(gemmFuncName);
     SmallVector<Type> inputTypes = {
-      x.getType(), z_x.getType(), w.getType(), z_w.getType(), y.getType()
+      rewriter.getI32Type(), x.getType(), z_x.getType(), w.getType(), z_w.getType(), y.getType()
     };
     TypeRange resultTypes = convOp.getResultTypes();
 
@@ -167,7 +182,10 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       funcDecl.setPrivate();
     }
 
-    SmallVector<Value> originalOperands = {x, z_x, w, z_w, y};
+    auto loadOp = IREE::Util::GlobalLoadOp::create(rewriter, loc, globalDecl);
+    Value loadOpRes = loadOp.getResult();
+
+    SmallVector<Value> originalOperands = {loadOpRes, x, z_x, w, z_w, y};
     SmallVector<Value> castedOperands;
     for (size_t i = 0; i < originalOperands.size(); ++i) {
       if (originalOperands[i].getType() != dynamicInputTypes[i]) {
