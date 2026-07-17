@@ -33,7 +33,7 @@ namespace {
 // kernel[5*(3+0) + 4] = z_x
 // kernel[5*(3+4) + 4] = kernel[5*(3+8) + 4] = kernel[5*(3+12) + 4] = z_w
 // kernel[5*(5+0) + 2] = kernel[5*(5+4) + 2] = kernel[5*(5+8)  + 2] = (x_rows << 16) | 0x0080
-[[maybe_unused]] static uint32_t centered_matmul_kernel[] = {
+static std::array<uint32_t, 5*4*4> centered_matmul_kernel {
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
   0x00000041, 0x02000000, 0x00000000, 0x00000000, 0x00000000, // 4
@@ -158,10 +158,8 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
 
     SymbolTable symbolTable(moduleOp);
 
-    std::vector<uint8_t> myKernelBinary = {0,1,2,3};
     auto kernelTensorType = RankedTensorType::get(
-      {static_cast<int64_t>(myKernelBinary.size())},
-      rewriter.getI8Type()
+      {static_cast<int64_t>(centered_matmul_kernel.size())}, i32
     );
 
     StringRef initFuncName = "custom.init_accelerator";
@@ -170,11 +168,9 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(moduleOp.getBody());
 
-      auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
+      auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, i32);
       Type i32 = rewriter.getI32Type();
-      auto initFuncType = rewriter.getFunctionType(
-        {unrankedTensorType}, {i32}
-      );
+      auto initFuncType = rewriter.getFunctionType({unrankedTensorType}, {i32});
       initFuncDecl = func::FuncOp::create(rewriter, loc, initFuncName, initFuncType);
       initFuncDecl.setPrivate();
 
@@ -208,10 +204,10 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       // createBlock automatically moves the insertion point inside the block
       rewriter.createBlock(&initOp.getBody());
 
-      auto denseAttr = DenseElementsAttr::get(kernelTensorType, ArrayRef(myKernelBinary));
+      auto denseAttr = DenseElementsAttr::get(kernelTensorType, ArrayRef(centered_matmul_kernel));
       Value kernelBlob = arith::ConstantOp::create(rewriter, loc, kernelTensorType, denseAttr);
 
-      auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, rewriter.getI8Type());
+      auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, i32);
       Value castedBlob = tensor::CastOp::create(rewriter, loc, unrankedTensorType, kernelBlob);
       auto callOp = func::CallOp::create(rewriter, loc, initFuncDecl, ValueRange{castedBlob});
 
