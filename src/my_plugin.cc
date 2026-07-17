@@ -29,7 +29,7 @@ namespace {
  * +--+--+--+--+
  */
 // Constants are -1=0xFFFFFFFF and delays are set to 0xDDEE
-static std::array<uint32_t, 5*4*4> centered_matmul_kernel {
+static const std::array<uint32_t, 5*4*4> centered_matmul_kernel {
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
   0x00000041, 0x02000000, 0x00000000, 0x00000000, 0x00000000, // 4
@@ -55,7 +55,6 @@ struct Conv2DMatmulAnalysis {
   int32_t z_x_val;
   int32_t z_w_val;
   uint16_t in_chan;
-  bool isTransposed;
   SmallVector<Value> operands;
 };
 
@@ -119,7 +118,9 @@ isMatmulEquivalent(
   auto yType = dyn_cast<RankedTensorType>(y.getType());
   if (!yType.getElementType().isInteger(32)) return failure();
 
-  Value wToPass = w;
+  auto transposeOp = w.getDefiningOp<linalg::TransposeOp>();
+  if (!transposeOp) return failure();
+
   // Given that the weight layout is HWCF if the transposition has put the
   // output features F before the input channels C this means (since the
   // height H and width W are both 1 they do not matter for stride
@@ -131,17 +132,18 @@ isMatmulEquivalent(
   // 3=F there is 0 and this means that before applying F was at the first
   // dimension; for the permutation [0,1,2,3] at index 3=F there is 3 this
   // means that F has not been moved.
-  if (auto transposeOp = w.getDefiningOp<linalg::TransposeOp>()) {
-    ArrayRef<int64_t> permutation = transposeOp.getPermutation();
-    assert(permutation.size() == 4);
-    int64_t cBefore = permutation[wC];
-    int64_t fBefore = permutation[wF];
+  ArrayRef<int64_t> permutation = transposeOp.getPermutation();
+  assert(permutation.size() == 4);
+  int64_t cBefore = permutation[wC];
+  int64_t fBefore = permutation[wF];
 
-    if (fBefore < cBefore) {
-      localAnalysis.isTransposed = true;
-      wToPass = transposeOp.getInput();
-    }
+  Value wToPass;
+  if (fBefore < cBefore) {
+    wToPass = transposeOp.getInput();
+  } else {
+    return failure();
   }
+
   localAnalysis.operands = {x, z_x, wToPass, z_w, y};
 
   analysis = localAnalysis;
@@ -155,7 +157,7 @@ getDynamicTensorType(Type t) {
     SmallVector<int64_t> dynShape(rankedType.getRank(), ShapedType::kDynamic);
     return RankedTensorType::get(dynShape, rankedType.getElementType());
   }
-  // TODO: assert that it is a scalar...
+  assert(t.isIntOrIndexOrFloat() && "Expected a RankedTensorType or a scalar type");
   return t;
 }
 
@@ -210,19 +212,17 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
     }
 
     {
-      // Save insertion point so we don't mess up the convOp replacement
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToEnd(moduleOp.getBody());
 
       auto initOp = IREE::Util::InitializerOp::create(rewriter, loc);
-      // createBlock automatically moves the insertion point inside the block
       rewriter.createBlock(&initOp.getBody());
 
       auto kernel = centered_matmul_kernel;
-
       kernel[5*(3+0) + 4] = analysis.z_x_val;
       kernel[5*(3+4) + 4] = kernel[5*(3+8) + 4] = kernel[5*(3+12) + 4] = analysis.z_w_val;
       kernel[5*(5+0) + 2] = kernel[5*(5+4) + 2] = kernel[5*(5+8)  + 2] = (analysis.in_chan << 16) | 0x0080;
+
       auto kernelTensorType = RankedTensorType::get(
         {static_cast<int64_t>(centered_matmul_kernel.size())}, i32
       );
@@ -247,22 +247,19 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       analysis.operands.begin(), analysis.operands.end(),
       std::back_inserter(inputTypes), [](Value v){ return v.getType(); }
     );
-    // TODO: this should be just a type.
-    TypeRange resultTypes = convOp.getResultTypes();
+    Type resultType = convOp.getResultTypes()[0];
 
     SmallVector<Type> dynamicInputTypes;
     for (Type t : inputTypes) dynamicInputTypes.push_back(getDynamicTensorType(t));
 
-    SmallVector<Type> dynamicResultTypes;
-    for (Type t : resultTypes) dynamicResultTypes.push_back(getDynamicTensorType(t));
+    Type dynamicResultType = getDynamicTensorType(resultType);
 
     if (!funcDecl) {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(moduleOp.getBody());
 
-      auto funcType = rewriter.getFunctionType(dynamicInputTypes, dynamicResultTypes);
+      auto funcType = rewriter.getFunctionType(dynamicInputTypes, {dynamicResultType});
       funcDecl = func::FuncOp::create(rewriter, loc, gemmFuncName, funcType);
-      // Must be set as private to signify it's an externally resolved symbol
       funcDecl.setPrivate();
     }
 
@@ -274,11 +271,14 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       analysis.operands.begin(), analysis.operands.end(),
       std::back_inserter(originalOperands)
     );
+
     SmallVector<Value> castedOperands;
     for (size_t i = 0; i < originalOperands.size(); ++i) {
       if (originalOperands[i].getType() != dynamicInputTypes[i]) {
-        castedOperands.push_back(tensor::CastOp::create(
-          rewriter, convOp.getLoc(), dynamicInputTypes[i], originalOperands[i])
+        castedOperands.push_back(
+          tensor::CastOp::create(
+            rewriter, convOp.getLoc(), dynamicInputTypes[i], originalOperands[i]
+          )
         );
       } else {
         castedOperands.push_back(originalOperands[i]);
@@ -287,19 +287,16 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
 
     auto callOp = func::CallOp::create(rewriter, loc, funcDecl, castedOperands);
 
-    // TODO: is this loop useless since the result should be only one?
-    SmallVector<Value> castedResults;
-    for (size_t i = 0; i < callOp.getNumResults(); ++i) {
-      if (callOp.getResult(i).getType() != resultTypes[i]) {
-        castedResults.push_back(tensor::CastOp::create(
-          rewriter, convOp.getLoc(), resultTypes[i], callOp.getResult(i))
-        );
-      } else {
-        castedResults.push_back(callOp.getResult(i));
-      }
+    Value callResult = callOp.getResult(0);
+    Value finalResult = callResult;
+
+    if (callResult.getType() != resultType) {
+      finalResult = tensor::CastOp::create(
+        rewriter, convOp.getLoc(), resultType, callResult
+      );
     }
 
-    rewriter.replaceOp(convOp, castedResults);
+    rewriter.replaceOp(convOp, finalResult);
 
     return success();
   }
