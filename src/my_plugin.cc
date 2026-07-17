@@ -127,6 +127,31 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
     Value z_w = convOp.getDpsInputOperand(3)->get();
     Value y = convOp.getDpsInits()[0];
 
+    // Given that the weight layout is HWCF if the transposition has put the
+    // output features F before the input channels C this means (since the
+    // height H and width W are both 1 they do not matter for stride
+    // calculations) that the operation is a matrix multiplication with
+    // transposed RHS i.e. we can load from the RHS with unit stride.
+    //
+    // To detect this we just index in the permutation to detect where the F and
+    // C dimensions were originally e.g. for the permutation [1,2,3,0] at index
+    // 3=F there is 0 and this means that before applying F was at the first
+    // dimension; for the permutation [0,1,2,3] at index 3=F there is 3 this
+    // means that F has not been moved.
+    if (auto transposeOp = w.getDefiningOp<linalg::TransposeOp>()) {
+      [[maybe_unused]] Value untransposedWeight = transposeOp.getInput();
+      constexpr int /* Hidx = 0, Widx = 1, */ Cidx = 2, Fidx = 3;
+
+      ArrayRef<int64_t> permutation = transposeOp.getPermutation();
+      assert(permutation.size() == 4 && "Malformed permutation for conv2d");
+      int64_t Cidx_before_perm = permutation[Cidx];
+      int64_t Fidx_before_perm = permutation[Fidx];
+
+      if (Fidx_before_perm < Cidx_before_perm) {
+        convOp.emitRemark("RHS transposed Matmul detected");
+      }
+    }
+
     ModuleOp moduleOp = convOp->getParentOfType<ModuleOp>();
     Location loc = convOp.getLoc();
     Type i32 = rewriter.getI32Type();
