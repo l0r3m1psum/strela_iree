@@ -29,10 +29,6 @@ namespace {
  * +--+--+--+--+
  */
 // Constants are -1=0xFFFFFFFF and delays are set to 0xDDEE
-// row_major[] = {}
-// kernel[5*(3+0) + 4] = z_x
-// kernel[5*(3+4) + 4] = kernel[5*(3+8) + 4] = kernel[5*(3+12) + 4] = z_w
-// kernel[5*(5+0) + 2] = kernel[5*(5+4) + 2] = kernel[5*(5+8)  + 2] = (x_rows << 16) | 0x0080
 static std::array<uint32_t, 5*4*4> centered_matmul_kernel {
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
@@ -55,17 +51,39 @@ static std::array<uint32_t, 5*4*4> centered_matmul_kernel {
   0x00000201, 0x02040300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 3
 };
 
+struct Conv2DMatmulAnalysis {
+  int32_t z_x_val;
+  int32_t z_w_val;
+  uint16_t in_chan;
+  bool isTransposed;
+  SmallVector<Value> operands;
+};
+
 static LogicalResult
-isMatmulEquivalent(linalg::Conv2DNhwcHwcfQOp convOp) {
+isMatmulEquivalent(
+  linalg::Conv2DNhwcHwcfQOp convOp, Conv2DMatmulAnalysis& analysis
+) {
+  Conv2DMatmulAnalysis localAnalysis{};
+
   Value x = convOp.getDpsInputOperand(0)->get();
   Value w = convOp.getDpsInputOperand(1)->get();
   Value z_x = convOp.getDpsInputOperand(2)->get();
   Value z_w = convOp.getDpsInputOperand(3)->get();
   Value y = convOp.getDpsInits()[0];
 
-  if (!z_x.getType().isInteger(32) || !z_w.getType().isInteger(32)) {
-    return failure();
+  std::array<Value, 2> zero_points {z_x, z_w};
+  std::array<int32_t, 2> zero_point_vals {0, 0};
+  for (size_t i = 0; i < zero_points.size(); ++i) {
+    Value zp = zero_points[0];
+    if (!zp.getType().isInteger(32)) return failure();
+    auto constantOp = zp.getDefiningOp<arith::ConstantOp>();
+    if (!constantOp) return failure();
+    auto intAttr = dyn_cast<IntegerAttr>(constantOp.getValue());
+    if (!intAttr) return failure();
+    zero_point_vals[i] = static_cast<int32_t>(intAttr.getInt());
   }
+  localAnalysis.z_x_val = zero_point_vals[0];
+  localAnalysis.z_w_val = zero_point_vals[1];
 
   auto isAllOnes = [](DenseIntElementsAttr attr) {
     if (!attr) return false;
@@ -75,24 +93,58 @@ isMatmulEquivalent(linalg::Conv2DNhwcHwcfQOp convOp) {
     return failure();
   }
 
-  // Check that the Filter (W) spatial dimensions are 1x1
-  // Layout is HWCF: index 0 (H), index 1 (W)
+  constexpr int wH = 0, wW = 1, wC = 2, wF = 3;
+
   auto wType = dyn_cast<RankedTensorType>(w.getType());
   if (!wType.getElementType().isInteger(8)) return failure();
-  if (wType.getDimSize(0) != 1 || wType.getDimSize(1) != 1) {
+  if (wType.getDimSize(wH) != 1 || wType.getDimSize(wW) != 1) {
     return failure();
   }
 
-  // Check that the Input (X) spatial dimensions are 1x1
-  // Layout is NHWC: index 1 (H), index 2 (W)
+  int64_t wCDimSize = wType.getDimSize(wC);
+  if (ShapedType::isDynamic(wCDimSize)
+    || wCDimSize > std::numeric_limits<uint16_t>::max()) {
+    return failure();
+  }
+  localAnalysis.in_chan = static_cast<uint16_t>(wCDimSize);
+
+  constexpr int xH = 1, xW = 2;
+
   auto xType = dyn_cast<RankedTensorType>(x.getType());
   if (!xType.getElementType().isInteger(8)) return failure();
-  if (xType.getDimSize(1) != 1 || xType.getDimSize(2) != 1) {
+  if (xType.getDimSize(xH) != 1 || xType.getDimSize(xW) != 1) {
     return failure();
   }
 
   auto yType = dyn_cast<RankedTensorType>(y.getType());
   if (!yType.getElementType().isInteger(32)) return failure();
+
+  Value wToPass = w;
+  // Given that the weight layout is HWCF if the transposition has put the
+  // output features F before the input channels C this means (since the
+  // height H and width W are both 1 they do not matter for stride
+  // calculations) that the operation is a matrix multiplication with
+  // transposed RHS i.e. we can load from the RHS with unit stride.
+  //
+  // To detect this we just index in the permutation to detect where the F and
+  // C dimensions were originally e.g. for the permutation [1,2,3,0] at index
+  // 3=F there is 0 and this means that before applying F was at the first
+  // dimension; for the permutation [0,1,2,3] at index 3=F there is 3 this
+  // means that F has not been moved.
+  if (auto transposeOp = w.getDefiningOp<linalg::TransposeOp>()) {
+    ArrayRef<int64_t> permutation = transposeOp.getPermutation();
+    assert(permutation.size() == 4);
+    int64_t cBefore = permutation[wC];
+    int64_t fBefore = permutation[wF];
+
+    if (fBefore < cBefore) {
+      localAnalysis.isTransposed = true;
+      wToPass = transposeOp.getInput();
+    }
+  }
+  localAnalysis.operands = {x, z_x, wToPass, z_w, y};
+
+  analysis = localAnalysis;
 
   return success();
 }
@@ -115,52 +167,18 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
     PatternRewriter& rewriter
   ) const override {
 
-    if (failed(isMatmulEquivalent(convOp))) {
+    Conv2DMatmulAnalysis analysis{};
+    if (failed(isMatmulEquivalent(convOp, analysis))) {
       return failure();
     }
 
     convOp.emitRemark("Offloading Conv2D equivalent to Matmul");
-
-    Value x = convOp.getDpsInputOperand(0)->get();
-    Value w = convOp.getDpsInputOperand(1)->get();
-    Value z_x = convOp.getDpsInputOperand(2)->get();
-    Value z_w = convOp.getDpsInputOperand(3)->get();
-    Value y = convOp.getDpsInits()[0];
-
-    // Given that the weight layout is HWCF if the transposition has put the
-    // output features F before the input channels C this means (since the
-    // height H and width W are both 1 they do not matter for stride
-    // calculations) that the operation is a matrix multiplication with
-    // transposed RHS i.e. we can load from the RHS with unit stride.
-    //
-    // To detect this we just index in the permutation to detect where the F and
-    // C dimensions were originally e.g. for the permutation [1,2,3,0] at index
-    // 3=F there is 0 and this means that before applying F was at the first
-    // dimension; for the permutation [0,1,2,3] at index 3=F there is 3 this
-    // means that F has not been moved.
-    if (auto transposeOp = w.getDefiningOp<linalg::TransposeOp>()) {
-      [[maybe_unused]] Value untransposedWeight = transposeOp.getInput();
-      constexpr int /* Hidx = 0, Widx = 1, */ Cidx = 2, Fidx = 3;
-
-      ArrayRef<int64_t> permutation = transposeOp.getPermutation();
-      assert(permutation.size() == 4 && "Malformed permutation for conv2d");
-      int64_t Cidx_before_perm = permutation[Cidx];
-      int64_t Fidx_before_perm = permutation[Fidx];
-
-      if (Fidx_before_perm < Cidx_before_perm) {
-        convOp.emitRemark("RHS transposed Matmul detected");
-      }
-    }
 
     ModuleOp moduleOp = convOp->getParentOfType<ModuleOp>();
     Location loc = convOp.getLoc();
     Type i32 = rewriter.getI32Type();
 
     SymbolTable symbolTable(moduleOp);
-
-    auto kernelTensorType = RankedTensorType::get(
-      {static_cast<int64_t>(centered_matmul_kernel.size())}, i32
-    );
 
     StringRef initFuncName = "custom.init_accelerator";
     auto initFuncDecl = moduleOp.lookupSymbol<func::FuncOp>(initFuncName);
@@ -169,7 +187,6 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       rewriter.setInsertionPointToStart(moduleOp.getBody());
 
       auto unrankedTensorType = RankedTensorType::get({ShapedType::kDynamic}, i32);
-      Type i32 = rewriter.getI32Type();
       auto initFuncType = rewriter.getFunctionType({unrankedTensorType}, {i32});
       initFuncDecl = func::FuncOp::create(rewriter, loc, initFuncName, initFuncType);
       initFuncDecl.setPrivate();
@@ -192,18 +209,23 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       symbolTable.insert(globalDecl);
     }
 
-    // TODO: the parameters for a kernel are z_x and z_w together with the
-    // delay to accumulate a resulting vector.
     {
       // Save insertion point so we don't mess up the convOp replacement
       OpBuilder::InsertionGuard guard(rewriter);
-      // Initializers usually go at the end of the module
       rewriter.setInsertionPointToEnd(moduleOp.getBody());
 
       auto initOp = IREE::Util::InitializerOp::create(rewriter, loc);
       // createBlock automatically moves the insertion point inside the block
       rewriter.createBlock(&initOp.getBody());
 
+      auto kernel = centered_matmul_kernel;
+
+      kernel[5*(3+0) + 4] = analysis.z_x_val;
+      kernel[5*(3+4) + 4] = kernel[5*(3+8) + 4] = kernel[5*(3+12) + 4] = analysis.z_w_val;
+      kernel[5*(5+0) + 2] = kernel[5*(5+4) + 2] = kernel[5*(5+8)  + 2] = (analysis.in_chan << 16) | 0x0080;
+      auto kernelTensorType = RankedTensorType::get(
+        {static_cast<int64_t>(centered_matmul_kernel.size())}, i32
+      );
       auto denseAttr = DenseElementsAttr::get(kernelTensorType, ArrayRef(centered_matmul_kernel));
       Value kernelBlob = arith::ConstantOp::create(rewriter, loc, kernelTensorType, denseAttr);
 
@@ -220,9 +242,12 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
     StringRef gemmFuncName = "custom.my_centered_gemm";
 
     auto funcDecl = moduleOp.lookupSymbol<func::FuncOp>(gemmFuncName);
-    SmallVector<Type> inputTypes = {
-      rewriter.getI32Type(), x.getType(), z_x.getType(), w.getType(), z_w.getType(), y.getType()
-    };
+    SmallVector<Type> inputTypes = {i32};
+    std::transform(
+      analysis.operands.begin(), analysis.operands.end(),
+      std::back_inserter(inputTypes), [](Value v){ return v.getType(); }
+    );
+    // TODO: this should be just a type.
     TypeRange resultTypes = convOp.getResultTypes();
 
     SmallVector<Type> dynamicInputTypes;
@@ -244,7 +269,11 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
     auto loadOp = IREE::Util::GlobalLoadOp::create(rewriter, loc, globalDecl);
     Value loadOpRes = loadOp.getResult();
 
-    SmallVector<Value> originalOperands = {loadOpRes, x, z_x, w, z_w, y};
+    SmallVector<Value> originalOperands = {loadOpRes};
+    std::copy(
+      analysis.operands.begin(), analysis.operands.end(),
+      std::back_inserter(originalOperands)
+    );
     SmallVector<Value> castedOperands;
     for (size_t i = 0; i < originalOperands.size(); ++i) {
       if (originalOperands[i].getType() != dynamicInputTypes[i]) {
@@ -258,6 +287,7 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
 
     auto callOp = func::CallOp::create(rewriter, loc, funcDecl, castedOperands);
 
+    // TODO: is this loop useless since the result should be only one?
     SmallVector<Value> castedResults;
     for (size_t i = 0; i < callOp.getNumResults(); ++i) {
       if (callOp.getResult(i).getType() != resultTypes[i]) {
