@@ -4,3 +4,6 @@
 [submodule "3rdparty/tosa-converter-for-tflite"]
 	path = 3rdparty/tosa-converter-for-tflite
 	url = https://gitlab.arm.com/tosa/tosa-converter-for-tflite.git
+[submodule "3rdparty/strela_pynq"]
+	path = 3rdparty/strela_pynq
+	url = https://github.com/l0r3m1psum/strela_pynq.git
