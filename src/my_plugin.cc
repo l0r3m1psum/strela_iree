@@ -272,6 +272,8 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       std::back_inserter(originalOperands)
     );
 
+    // TODO: add tensor.collapse_shape for both input and weight.
+
     SmallVector<Value> castedOperands;
     for (size_t i = 0; i < originalOperands.size(); ++i) {
       if (originalOperands[i].getType() != dynamicInputTypes[i]) {

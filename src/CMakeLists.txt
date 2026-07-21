@@ -22,3 +22,17 @@ target_link_libraries(custom_module
     iree_vm_dynamic_api
     iree_vm_vm
 )
+
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" TARGET_ARCH)
+if(TARGET_ARCH MATCHES "^arm")
+    add_library(strela INTERFACE IMPORTED)
+    set_target_properties(strela PROPERTIES
+        INTERFACE_LINK_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/strela_pynq/lib"
+    )
+    set_target_properties(strela PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/strela_pynq/include"
+    )
+    set_target_properties(strela PROPERTIES INTERFACE_LINK_LIBRARIES "-lstrela")
+    set_target_properties(custom_module PROPERTIES SKIP_BUILD_RPATH TRUE)
+    target_link_libraries(custom_module PRIVATE strela)
+endif()

@@ -12,24 +12,53 @@ ipaddr="$1"
 iree-compile \
 	--iree-hal-target-device=local \
 	--iree-hal-local-target-device-backends=vmvx \
-	3rdparty/iree/samples/models/simple_abs.mlir -o simple_abs.vmfb
+	3rdparty/iree/samples/models/simple_abs.mlir -o simple_abs_vmx.vmfb
+
+iree-compile \
+	--iree-hal-target-backends=llvm-cpu \
+	--iree-llvmcpu-link-embedded=false \
+	--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf \
+	3rdparty/iree/samples/models/simple_abs.mlir -o simple_abs_armv7a.vmfb
 
 iree-compile \
 	--iree-plugin=example2 \
 	--iree-hal-target-device=local \
 	--iree-hal-local-target-device-backends=vmvx \
-	ad01_int8.mlir -o ad01_int8.vmfb
+	ad01_int8.mlir -o ad01_int8_vmx.vmfb
 
-scp iree-build-arm/tools/iree-run-module simple_abs.vmfb ad01_int8.vmfb "root@${ipaddr}:/root"
+iree-compile \
+	--iree-plugin=example2 \
+	--iree-hal-target-backends=llvm-cpu \
+	--iree-llvmcpu-link-embedded=false \
+	--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf \
+	ad01_int8.mlir -o ad01_int8_armv7a.vmfb
+
+scp iree-build-arm/tools/iree-run-module \
+	build-arm/libcustom_module.so \
+	simple_abs_vmx.vmfb \
+	simple_abs_armv7a.vmfb \
+	ad01_int8_vmx.vmfb \
+	ad01_int8_armv7a.vmfb \
+	"root@${ipaddr}:/root"
 ssh -t "root@${ipaddr}" << EOF
 	set -xe
 	./iree-run-module \
-		--module=simple_abs.vmfb \
+		--module=simple_abs_vmx.vmfb \
 		--function=abs \
 		--input="f32=-1" \
 		--device=local-sync
 	./iree-run-module \
-		--module=ad01_int8.vmfb \
+		--module=simple_abs_armv7a.vmfb \
+		--function=abs \
+		--input="f32=-1" \
+		--device=local-sync
+	./iree-run-module \
+		--module=ad01_int8_vmx.vmfb \
+		--function=main \
+		--input="2x640xi8=0" \
+		--device=local-sync
+	./iree-run-module \
+		--module=ad01_int8_armv7a.vmfb \
 		--function=main \
 		--input="2x640xi8=0" \
 		--device=local-sync
