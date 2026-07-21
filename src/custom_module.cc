@@ -7,6 +7,8 @@
 #include "iree/vm/dynamic/api.h"
 #include "iree/vm/native_module_cc.h"
 
+#include "strela.h"
+
 using namespace iree;
 
 class CustomModuleState final {
@@ -34,13 +36,19 @@ class CustomModuleState final {
      * [ --------------- ] [ |     ]
      * [                 ] [ |     ]
      * [                 ] [ |     ]
+     *
+     * P.S. right now we only support A B'
      */
 
     // TODO: verify that the delays and zero points are correct. The delay
     // should be the number of rows in B
 
-    // strela_config(dev, kernel, &conf);
-    // The previous line must be looped.
+    // TODO: copy the data to suitable int32 buffer in strela_buffer
+    // TODO: allocate output strela_buffer to then copy to y
+    // TODO: the compiler should reshape to matrices the inputs?
+    strela_kernel kernel = {true, kernel_handle};
+    // for (int i = 0; i < A_rows/3; i+=3)
+      // strela_config(dev, kernel, &conf);
 
     std::cerr << "handle " << kernel_handle << ' ';
 
@@ -59,16 +67,62 @@ class CustomModuleState final {
 
   StatusOr<int32_t>
   InitAccelerator(
-    vm::ref<iree_hal_buffer_view_t> kernel
+    vm::ref<iree_hal_buffer_view_t> kernel_bitstream
   ) {
+    iree_hal_buffer_view_t *kernel_buf_view = kernel_bitstream.get();
+    iree_hal_buffer_t* buffer = iree_hal_buffer_view_buffer(kernel_buf_view);
 
-    // strela_kernel kernel = strela_kernel_alloc(dev);
-    // strela_kernel_set(dev, kernel, bypass_kernel);
-    // TODO: this function should return the handle from STRELA or an error.
-    static int32_t i = 0;
-    std::cerr << "init\n";
+    iree_hal_element_type_t element_type = iree_hal_buffer_view_element_type(kernel_buf_view);
+    // TODO: even if it does not really matter this should be a UINT_32 but we
+    // need to change the type emitted by the compiler plugin.
+    if (element_type != IREE_HAL_ELEMENT_TYPE_INT_32) {
+      return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Expected kernel_bitstream to be UINT_32"
+      );
+    }
 
-    return i++;
+    iree_device_size_t byte_length = iree_hal_buffer_view_byte_length(kernel_buf_view);
+    if (byte_length != sizeof (uint32_t) * STRELA_KERNEL_SIZE) {
+      return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Expected kernel_bitstream to have the correct length"
+      );
+    }
+
+    iree_hal_buffer_mapping_t mapping = {0};
+    iree_status_t status = iree_hal_buffer_map_range(
+      buffer,
+      IREE_HAL_MAPPING_MODE_SCOPED,
+      IREE_HAL_MEMORY_ACCESS_READ,
+      0,
+      byte_length,
+      &mapping
+    );
+
+    if (!iree_status_is_ok(status)) {
+      return status;
+    }
+
+    const uint32_t *data = (uint32_t*)mapping.contents.data;
+
+    strela_dev *dev = strela_dev_init(0);
+    strela_kernel kernel = strela_kernel_alloc(dev);
+    strela_kernel_set(dev, kernel, data);
+
+    if (!strela_dev_ok(dev)) {
+      iree_hal_buffer_unmap_range(&mapping);
+      return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "strela_dev failed to initialize or set kernel"
+      );
+    }
+
+    std::cerr << "kernel.handle == " << kernel.handle << '\n';
+
+    iree_hal_buffer_unmap_range(&mapping);
+
+    return kernel.handle;
   }
 
  private:

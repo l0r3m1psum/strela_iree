@@ -33,12 +33,21 @@ iree-compile \
 	--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf \
 	ad01_int8.mlir -o ad01_int8_armv7a.vmfb
 
+iree-compile \
+	--iree-plugin=example2 \
+	--iree-example2-fusion \
+	--iree-hal-target-backends=llvm-cpu \
+	--iree-llvmcpu-link-embedded=false \
+	--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf \
+	ad01_int8.mlir -o ad01_int8_armv7a_strela.vmfb
+
 scp iree-build-arm/tools/iree-run-module \
 	build-arm/libcustom_module.so \
 	simple_abs_vmx.vmfb \
 	simple_abs_armv7a.vmfb \
 	ad01_int8_vmx.vmfb \
 	ad01_int8_armv7a.vmfb \
+	ad01_int8_armv7a_strela.vmfb \
 	"root@${ipaddr}:/root"
 ssh -t "root@${ipaddr}" << EOF
 	set -xe
@@ -59,6 +68,12 @@ ssh -t "root@${ipaddr}" << EOF
 		--device=local-sync
 	./iree-run-module \
 		--module=ad01_int8_armv7a.vmfb \
+		--function=main \
+		--input="2x640xi8=0" \
+		--device=local-sync
+	./iree-run-module \
+		--module=./libcustom_module.so \
+		--module=ad01_int8_armv7a_strela.vmfb \
 		--function=main \
 		--input="2x640xi8=0" \
 		--device=local-sync
