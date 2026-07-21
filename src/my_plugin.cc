@@ -239,6 +239,26 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       IREE::Util::ReturnOp::create(rewriter, loc);
     }
 
+    auto collapseTo2D = [&](Value val) -> Value {
+      auto type = dyn_cast<RankedTensorType>(val.getType());
+      ReassociationIndices merge_dims = {0, 1, 2}, keep_dims = {3};
+      SmallVector<ReassociationIndices> reassoc = {merge_dims, keep_dims};
+
+      int64_t dim0 = ShapedType::kDynamic;
+      bool shape_is_comptime_know = !type.isDynamicDim(0)
+        && !type.isDynamicDim(1) && !type.isDynamicDim(2);
+      if (shape_is_comptime_know) {
+        dim0 = type.getDimSize(0) * type.getDimSize(1) * type.getDimSize(2);
+      }
+
+      auto collapsedType = RankedTensorType::get({dim0, type.getDimSize(3)}, type.getElementType());
+      return tensor::CollapseShapeOp::create(rewriter, loc, collapsedType, val, reassoc);
+    };
+
+    analysis.operands[0] = collapseTo2D(analysis.operands[0]); // x
+    analysis.operands[2] = collapseTo2D(analysis.operands[2]); // wToPass
+    analysis.operands[4] = collapseTo2D(analysis.operands[4]); // y
+
     StringRef gemmFuncName = "custom.my_centered_gemm";
 
     auto funcDecl = moduleOp.lookupSymbol<func::FuncOp>(gemmFuncName);
@@ -247,12 +267,13 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       analysis.operands.begin(), analysis.operands.end(),
       std::back_inserter(inputTypes), [](Value v){ return v.getType(); }
     );
-    Type resultType = convOp.getResultTypes()[0];
+    Type origResultType = convOp.getResultTypes()[0]; // The final 4D output type
+    Type callResultType = analysis.operands[4].getType(); // The 2D collapsed type of 'y'
 
     SmallVector<Type> dynamicInputTypes;
     for (Type t : inputTypes) dynamicInputTypes.push_back(getDynamicTensorType(t));
 
-    Type dynamicResultType = getDynamicTensorType(resultType);
+    Type dynamicResultType = getDynamicTensorType(callResultType);
 
     if (!funcDecl) {
       OpBuilder::InsertionGuard guard(rewriter);
@@ -272,8 +293,7 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       std::back_inserter(originalOperands)
     );
 
-    // TODO: add tensor.collapse_shape for both input and weight.
-
+    // We make tensor shape dynamic (i.e. remove shape information)
     SmallVector<Value> castedOperands;
     for (size_t i = 0; i < originalOperands.size(); ++i) {
       if (originalOperands[i].getType() != dynamicInputTypes[i]) {
@@ -290,13 +310,19 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
     auto callOp = func::CallOp::create(rewriter, loc, funcDecl, castedOperands);
 
     Value callResult = callOp.getResult(0);
-    Value finalResult = callResult;
 
-    if (callResult.getType() != resultType) {
-      finalResult = tensor::CastOp::create(
-        rewriter, convOp.getLoc(), resultType, callResult
+    // We add back the static shape information
+    Value castedCallResult = callResult;
+    if (callResult.getType() != callResultType) {
+      castedCallResult = tensor::CastOp::create(
+        rewriter, convOp.getLoc(), callResultType, callResult
       );
     }
+
+    SmallVector<ReassociationIndices> reassoc = {{0, 1, 2}, {3}};
+    Value finalResult = tensor::ExpandShapeOp::create(
+      rewriter, loc, origResultType, castedCallResult, reassoc
+    );
 
     rewriter.replaceOp(convOp, finalResult);
 
