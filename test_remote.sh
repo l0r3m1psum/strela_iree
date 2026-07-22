@@ -9,6 +9,8 @@ then
 fi
 ipaddr="$1"
 
+pynq_flags="--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf --iree-llvmcpu-target-cpu=generic --iree-llvmcpu-target-cpu-features=+vfp3,+neon"
+
 iree-compile \
 	--iree-hal-target-device=local \
 	--iree-hal-local-target-device-backends=vmvx \
@@ -17,7 +19,7 @@ iree-compile \
 iree-compile \
 	--iree-hal-target-backends=llvm-cpu \
 	--iree-llvmcpu-link-embedded=false \
-	--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf \
+	$pynq_flags \
 	3rdparty/iree/samples/models/simple_abs.mlir -o simple_abs_armv7a.vmfb
 
 iree-compile \
@@ -30,7 +32,7 @@ iree-compile \
 	--iree-plugin=example2 \
 	--iree-hal-target-backends=llvm-cpu \
 	--iree-llvmcpu-link-embedded=false \
-	--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf \
+	$pynq_flags \
 	ad01_int8.mlir -o ad01_int8_armv7a.vmfb
 
 iree-compile \
@@ -38,8 +40,22 @@ iree-compile \
 	--iree-example2-fusion \
 	--iree-hal-target-backends=llvm-cpu \
 	--iree-llvmcpu-link-embedded=false \
-	--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf \
+	$pynq_flags \
 	ad01_int8.mlir -o ad01_int8_armv7a_strela.vmfb
+
+iree-compile \
+	--iree-hal-target-backends=llvm-cpu \
+	--iree-llvmcpu-link-embedded=false \
+	$pynq_flags \
+	matmul.mlir -o matmul_armv7a.vmfb
+
+iree-compile \
+	--iree-plugin=example2 \
+	--iree-example2-fusion \
+	--iree-hal-target-backends=llvm-cpu \
+	--iree-llvmcpu-link-embedded=false \
+	$pynq_flags \
+	matmul.mlir -o matmul_armv7a_strela.vmfb
 
 scp iree-build-arm/tools/iree-run-module \
 	build-arm/libcustom_module.so \
@@ -48,6 +64,8 @@ scp iree-build-arm/tools/iree-run-module \
 	ad01_int8_vmx.vmfb \
 	ad01_int8_armv7a.vmfb \
 	ad01_int8_armv7a_strela.vmfb \
+	matmul_armv7a.vmfb \
+	matmul_armv7a_strela.vmfb \
 	"root@${ipaddr}:/root"
 ssh -t "root@${ipaddr}" << EOF
 	set -xe
@@ -76,5 +94,18 @@ ssh -t "root@${ipaddr}" << EOF
 		--module=ad01_int8_armv7a_strela.vmfb \
 		--function=main \
 		--input="2x640xi8=0" \
+		--device=local-sync
+	./iree-run-module \
+		--module=matmul_armv7a.vmfb \
+		--function=main \
+		--input="9x1x1x9xi8=2" \
+		--input="9x1x1x9xi8=2" \
+		--device=local-sync
+	./iree-run-module \
+		--module=./libcustom_module.so \
+		--module=matmul_armv7a_strela.vmfb \
+		--function=main \
+		--input="9x1x1x9xi8=2" \
+		--input="9x1x1x9xi8=2" \
 		--device=local-sync
 EOF

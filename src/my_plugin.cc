@@ -73,7 +73,7 @@ isMatmulEquivalent(
   std::array<Value, 2> zero_points {z_x, z_w};
   std::array<int32_t, 2> zero_point_vals {0, 0};
   for (size_t i = 0; i < zero_points.size(); ++i) {
-    Value zp = zero_points[0];
+    Value zp = zero_points[i];
     if (!zp.getType().isInteger(32)) return failure();
     auto constantOp = zp.getDefiningOp<arith::ConstantOp>();
     if (!constantOp) return failure();
@@ -219,9 +219,9 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
       rewriter.createBlock(&initOp.getBody());
 
       auto kernel = centered_matmul_kernel;
-      kernel[5*(3+0) + 4] = analysis.z_x_val;
-      kernel[5*(3+4) + 4] = kernel[5*(3+8) + 4] = kernel[5*(3+12) + 4] = analysis.z_w_val;
-      kernel[5*(5+0) + 2] = kernel[5*(5+4) + 2] = kernel[5*(5+8)  + 2] = (analysis.in_chan << 16) | 0x0080;
+      kernel.at(5*(3+0) + 4) = analysis.z_x_val;
+      kernel.at(5*(3+4) + 4) = kernel.at(5*(3+8) + 4) = kernel.at(5*(3+12) + 4) = analysis.z_w_val;
+      kernel.at(5*(5+0) + 2) = kernel.at(5*(5+4) + 2) = kernel.at(5*(5+8)  + 2) = (analysis.in_chan << 16) | 0x0080;
 
       auto kernelTensorType = RankedTensorType::get(
         {static_cast<int64_t>(centered_matmul_kernel.size())}, i32

@@ -26,18 +26,20 @@ class CustomModuleState final {
   ) {
 
     /*
-     * The STRELA kernel multiplies 3 rows of A with one column of B in single
-     * execution. As shown below. Of course doing A B' is more efficient because
-     * we an load from B with "unit" stride.
+     * The STRELA kernel multiplies 1 row of X (were the number of rows is the
+     * batch size), with 3 column of W, to produce 3 consecutive elements a row
+     * of Y in single execution.
      *
-     *          A              B
-     * [ --------------- ] [ |     ]
-     * [ --------------- ] [ |     ]
-     * [ --------------- ] [ |     ]
-     * [                 ] [ |     ]
-     * [                 ] [ |     ]
+     *          X               W              Y
+     * [ --------------- ] [ | | |     ]   [ * * *    ]
+     * [                 ] [ | | |     ]   [          ]
+     * [                 ] [ | | |     ] = [          ]
+     * [                 ] [ | | |     ]   [          ]
+     * [                 ] [ | | |     ]   [          ]
      *
-     * P.S. right now we only support A B'
+     * Of course doing X W' is more efficient because we an load from W with
+     * "unit" stride.
+     * P.S. right now we only support X W'.
      */
 
     iree_hal_buffer_view_t* x_view = x.get();
@@ -67,10 +69,17 @@ class CustomModuleState final {
       );
     }
 
-    // A Matrix [M x K] & B Matrix [N x K]
+    // X Matrix [M x K] & W' Matrix [N x K]
     iree_host_size_t M = iree_hal_buffer_view_shape_dim(x_view, 0);
     iree_host_size_t K = iree_hal_buffer_view_shape_dim(x_view, 1);
     iree_host_size_t N = iree_hal_buffer_view_shape_dim(w_view, 0);
+
+    if (K != iree_hal_buffer_view_shape_dim(w_view, 1)) {
+      return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Expected the input matrices to have compatible shapes"
+      );
+    }
 
     struct ScopedMap {
       iree_hal_buffer_mapping_t mapping = {0};
@@ -91,7 +100,7 @@ class CustomModuleState final {
     ScopedMap map_x, map_w, map_y;
     IREE_RETURN_IF_ERROR(map_x.map(x_view, IREE_HAL_MEMORY_ACCESS_READ));
     IREE_RETURN_IF_ERROR(map_w.map(w_view, IREE_HAL_MEMORY_ACCESS_READ));
-    IREE_RETURN_IF_ERROR(map_y.map(y_view, IREE_HAL_MEMORY_ACCESS_WRITE));
+    IREE_RETURN_IF_ERROR(map_y.map(y_view, IREE_HAL_MEMORY_ACCESS_READ|IREE_HAL_MEMORY_ACCESS_WRITE));
 
     strela_dev *dev = strela_dev_init(0);
 
@@ -109,42 +118,56 @@ class CustomModuleState final {
     int32_t *sw_ptr = (int32_t *) strela_buffer_to_ptr(dev, sw);
     int32_t *sy_ptr = (int32_t *) strela_buffer_to_ptr(dev, sy);
 
-    const int8_t* x_in = (const int8_t *) map_x.mapping.contents.data;
+    const int8_t *x_in = (const int8_t *) map_x.mapping.contents.data;
     for (size_t i = 0; i < M * K; ++i) { sx_ptr[i] = x_in[i]; }
 
-    const int8_t* w_in = (const int8_t *) map_w.mapping.contents.data;
+    const int8_t *w_in = (const int8_t *) map_w.mapping.contents.data;
     for (size_t i = 0; i < N * K; ++i) { sw_ptr[i] = w_in[i]; }
 
-    strela_kernel kernel = {true, (unsigned)kernel_handle};
+    strela_kernel kernel = {true, (unsigned) kernel_handle};
 
-    for (size_t i = 0; i < M; i += 3) {
-      size_t row0 = i + 0, row1 = i + 1, row2 = i + 2;
+#if 1
+   for (size_t i = 0; i < M; i += 1) {
+      for (size_t j = 0; j < N; j += 3) {
+        size_t col0 = j + 0, col1 = j + 1, col2 = j + 2;
 
-      for (size_t j = 0; j < N; j += 1) {
         strela_conf conf = {0};
 
-        // STRELA columns are disabled to avoiding out-of-bounds r/w.
-        size_t K0 = K, K1 = row1 < M ? K : 0, K2 = row2 < M ? K : 0;
-        size_t O0 = 1, O1 = row1 < M ? 1 : 0, O2 = row2 < M ? 1 : 0;
+        // STRELA columns are disabled to avoid out-of-bounds r/w.
+        size_t K0 = K, K1 = col1 < N ? K : 0, K2 = col2 < N ? K : 0;
+        size_t O0 = 1, O1 = col1 < N ? 1 : 0, O2 = col2 < N ? 1 : 0;
 
-        // Input: 1 row of B'
-        conf.inp0_offset = sw.offset_words_from_base + j * K; conf.inp0_count = K; conf.inp0_stride = 1;
+        // Input: 1 row of X [M x K]
+        conf.inp0_offset = sx.offset_words_from_base + i * K; conf.inp0_count = K; conf.inp0_stride = 1;
 
-        // Inputs: 3 rows of A
-        conf.inp1_offset = sx.offset_words_from_base + row0 * K; conf.inp1_count = K0; conf.inp1_stride = 1;
-        conf.inp2_offset = sx.offset_words_from_base + row1 * K; conf.inp2_count = K1; conf.inp2_stride = 1;
-        conf.inp3_offset = sx.offset_words_from_base + row2 * K; conf.inp3_count = K2; conf.inp3_stride = 1;
+        // Inputs: 3 rows of W' [N x K]
+        conf.inp1_offset = sw.offset_words_from_base + col0 * K; conf.inp1_count = K0; conf.inp1_stride = 1;
+        conf.inp2_offset = sw.offset_words_from_base + col1 * K; conf.inp2_count = K1; conf.inp2_stride = 1;
+        conf.inp3_offset = sw.offset_words_from_base + col2 * K; conf.inp3_count = K2; conf.inp3_stride = 1;
 
-        // Outputs: mapped to the corresponding C matrix coordinates
-        conf.out1_offset = sy.offset_words_from_base + row0 * N + j; conf.out1_count = O0;
-        conf.out2_offset = sy.offset_words_from_base + row1 * N + j; conf.out2_count = O1;
-        conf.out3_offset = sy.offset_words_from_base + row2 * N + j; conf.out3_count = O2;
+        // Outputs: mapped to 3 adjacent elements in the SAME row (i) of Y
+        conf.out1_offset = sy.offset_words_from_base + i * N + col0; conf.out1_count = O0;
+        conf.out2_offset = sy.offset_words_from_base + i * N + col1; conf.out2_count = O1;
+        conf.out3_offset = sy.offset_words_from_base + i * N + col2; conf.out3_count = O2;
 
         // TODO configure just at the first and last iterations of the loop.
         strela_config(dev, kernel, &conf);
         strela_execute(dev);
       }
     }
+#else
+  for (size_t i = 0; i < M; ++i) {
+    for (size_t j = 0; j < N; ++j) {
+      int32_t acc = 0;
+      for (size_t k = 0; k < K; ++k) {
+        int32_t x_val = x_in[i * K + k] - z_x;
+        int32_t w_val = w_in[j * K + k] - z_w;
+        acc += x_val * w_val;
+      }
+      sy_ptr[i * N + j] = acc;
+    }
+  }
+#endif
 
     if (!strela_dev_ok(dev)) {
       // Here we leak buffers but it does not matter since we halt the execution of the VM.
@@ -154,7 +177,8 @@ class CustomModuleState final {
     }
 
     int32_t *y_out = (int32_t *) map_y.mapping.contents.data;
-    for (size_t i = 0; i < M * N; ++i) { y_out[i] = sy_ptr[i]; }
+    // This += is necessary to implement the accumulation behavior of linalg.matmul
+    for (size_t i = 0; i < M * N; ++i) { y_out[i] += sy_ptr[i]; }
 
     strela_buffer_free(dev, sx);
     strela_buffer_free(dev, sw);
