@@ -129,26 +129,26 @@ class CustomModuleState final {
 #if 1
    for (size_t i = 0; i < M; i += 1) {
       for (size_t j = 0; j < N; j += 3) {
-        size_t col0 = j + 0, col1 = j + 1, col2 = j + 2;
+        size_t j0 = j + 0, j1 = j + 1, j2 = j + 2;
 
         strela_conf conf = {0};
 
         // STRELA columns are disabled to avoid out-of-bounds r/w.
-        size_t K0 = K, K1 = col1 < N ? K : 0, K2 = col2 < N ? K : 0;
-        size_t O0 = 1, O1 = col1 < N ? 1 : 0, O2 = col2 < N ? 1 : 0;
+        size_t K0 = K, K1 = j1 < N ? K : 0, K2 = j2 < N ? K : 0;
+        size_t O0 = 1, O1 = j1 < N ? 1 : 0, O2 = j2 < N ? 1 : 0;
 
         // Input: 1 row of X [M x K]
         conf.inp0_offset = sx.offset_words_from_base + i * K; conf.inp0_count = K; conf.inp0_stride = 1;
 
         // Inputs: 3 rows of W' [N x K]
-        conf.inp1_offset = sw.offset_words_from_base + col0 * K; conf.inp1_count = K0; conf.inp1_stride = 1;
-        conf.inp2_offset = sw.offset_words_from_base + col1 * K; conf.inp2_count = K1; conf.inp2_stride = 1;
-        conf.inp3_offset = sw.offset_words_from_base + col2 * K; conf.inp3_count = K2; conf.inp3_stride = 1;
+        conf.inp1_offset = sw.offset_words_from_base + j0 * K; conf.inp1_count = K0; conf.inp1_stride = 1;
+        conf.inp2_offset = sw.offset_words_from_base + j1 * K; conf.inp2_count = K1; conf.inp2_stride = 1;
+        conf.inp3_offset = sw.offset_words_from_base + j2 * K; conf.inp3_count = K2; conf.inp3_stride = 1;
 
         // Outputs: mapped to 3 adjacent elements in the SAME row (i) of Y
-        conf.out1_offset = sy.offset_words_from_base + i * N + col0; conf.out1_count = O0;
-        conf.out2_offset = sy.offset_words_from_base + i * N + col1; conf.out2_count = O1;
-        conf.out3_offset = sy.offset_words_from_base + i * N + col2; conf.out3_count = O2;
+        conf.out1_offset = sy.offset_words_from_base + i * N + j0; conf.out1_count = O0;
+        conf.out2_offset = sy.offset_words_from_base + i * N + j1; conf.out2_count = O1;
+        conf.out3_offset = sy.offset_words_from_base + i * N + j2; conf.out3_count = O2;
 
         // TODO configure just at the first and last iterations of the loop.
         strela_config(dev, kernel, &conf);

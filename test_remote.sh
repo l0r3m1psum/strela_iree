@@ -98,14 +98,14 @@ ssh -t "root@${ipaddr}" << EOF
 	./iree-run-module \
 		--module=matmul_armv7a.vmfb \
 		--function=main \
-		--input="9x1x1x9xi8=2" \
+		--input="1x1x1x9xi8=2" \
 		--input="9x1x1x9xi8=2" \
 		--device=local-sync
 	./iree-run-module \
 		--module=./libcustom_module.so \
 		--module=matmul_armv7a_strela.vmfb \
 		--function=main \
-		--input="9x1x1x9xi8=2" \
+		--input="1x1x1x9xi8=2" \
 		--input="9x1x1x9xi8=2" \
 		--device=local-sync
 EOF
