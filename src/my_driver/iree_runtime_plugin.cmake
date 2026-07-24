@@ -1,0 +1,12 @@
+iree_register_external_hal_driver(
+  NAME
+    my_driver
+  SOURCE_DIR
+    "${CMAKE_CURRENT_LIST_DIR}"
+  BINARY_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/my_driver"
+  DRIVER_TARGET
+    my_custom_hal_driver
+  REGISTER_FN
+    iree_hal_my_driver_module_register
+)

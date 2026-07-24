@@ -1,5 +1,9 @@
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenDialect.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenOps.h"
+#include "iree/compiler/Dialect/HAL/IR/HALOps.h"
+#include "iree/compiler/Dialect/HAL/Target/TargetBackend.h"
+#include "iree/compiler/Dialect/HAL/Target/TargetDevice.h"
+#include "iree/compiler/Dialect/HAL/Target/TargetRegistry.h"
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/PluginAPI/Client.h"
 
@@ -14,6 +18,103 @@
 
 using namespace mlir;
 using namespace mlir::iree_compiler;
+
+namespace mlir::iree_compiler {
+
+// TODO: make enumeration for opcodes...
+struct StrelaExecutableHeader {
+  uint32_t opcode; // e.g., 1 for ABS, 2 for MATMUL
+};
+
+struct StrelaTargetBackend : public IREE::HAL::TargetBackend {
+
+  std::string getLegacyDefaultDeviceID() const override { return "strela"; }
+
+  void buildTranslationPassPipeline(
+    IREE::HAL::ExecutableTargetAttr exectutableTargetAttr,
+    OpPassManager &passManager
+  ) override {
+    // Here we should convert linalg to the strela dialect...
+  }
+
+  void
+  getDefaultExecutableTargets(
+    MLIRContext *context,
+    StringRef deviceID,
+    DictionaryAttr deviceConfigAttr,
+    SmallVectorImpl<IREE::HAL::ExecutableTargetAttr> &executableTargetAttrs
+  ) const override {
+    Builder b(context);
+    SmallVector<NamedAttribute, 0> configItems;
+
+    auto executableTargetAttr = b.getAttr<IREE::HAL::ExecutableTargetAttr>(
+      b.getStringAttr("strela"), b.getStringAttr("custom"), b.getDictionaryAttr(configItems)
+    );
+    executableTargetAttrs.push_back(executableTargetAttr);
+  }
+
+  LogicalResult serializeExecutable(
+    const SerializationOptions &options,
+    IREE::HAL::ExecutableVariantOp variantOp,
+    OpBuilder &executableBuilder
+  ) override {
+    uint32_t detected_opcode = 0;
+
+    mlir::ModuleOp innerModule = variantOp.getInnerModule();
+    if (innerModule) {
+      innerModule.walk([&detected_opcode](Operation *op) {
+        llvm::StringRef opName = op->getName().getStringRef();
+        // TODO: add support for ReLU
+        // TODO: all operations should be on 32 bit integers.
+        if (opName == "math.absi" || opName == "math.absf") {
+          llvm::errs() << "ABS detected\n";
+          detected_opcode = 1; // 1 = ABS
+        }
+      });
+    }
+
+    StrelaExecutableHeader header;
+    header.opcode = detected_opcode;
+
+    std::vector<uint8_t> binary_payload(sizeof(StrelaExecutableHeader));
+    std::memcpy(binary_payload.data(), &header, sizeof(StrelaExecutableHeader));
+
+    IREE::HAL::ExecutableBinaryOp::create(
+      executableBuilder,
+      variantOp.getLoc(),
+      variantOp.getSymNameAttr(),         // Inherit the symbol name ("strela")
+      variantOp.getTarget().getFormat(),  // Inherit the format ("custom")
+      binary_payload
+    );
+
+    return success();
+  }
+};
+
+struct StrelaTargetDevice : public IREE::HAL::TargetDevice {
+
+  IREE::HAL::DeviceTargetAttr
+  getDefaultDeviceTarget(
+    MLIRContext *context,
+    const IREE::HAL::TargetRegistry &targetRegistry
+  ) const override {
+    mlir::Builder b(context);
+
+    SmallVector<NamedAttribute, 0> configItems;
+    auto configAttr = b.getDictionaryAttr(configItems);
+    auto deviceID = b.getStringAttr("strela");
+
+    auto executableTargetAttr = b.getAttr<IREE::HAL::ExecutableTargetAttr>(
+      deviceID, b.getStringAttr("custom"), configAttr
+    );
+
+    return IREE::HAL::DeviceTargetAttr::get(
+      context, deviceID, configAttr, {executableTargetAttr}
+    );
+  }
+};
+
+} // namespace mlir::iree_compiler
 
 namespace {
 
@@ -33,22 +134,22 @@ static const std::array<uint32_t, 5*4*4> centered_matmul_kernel {
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
   0x00000041, 0x02000000, 0x00000000, 0x00000000, 0x00000000, // 4
-  0x00000201, 0x02040300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 0
+  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 0
 
   0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 13
   0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 9
   0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 5
-  0x00000201, 0x02040300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 1
+  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 1
 
   0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 14
   0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 10
   0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 6
-  0x00000201, 0x02040300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 2
+  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 2
 
   0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 15
   0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 11
   0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 7
-  0x00000201, 0x02040300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 3
+  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 3
 };
 
 struct Conv2DMatmulAnalysis {
@@ -546,6 +647,26 @@ struct MySession : public PluginSession<MySession, MyOptions> {
         extensionsWereMade = true;
       }
       return extensionsWereMade;
+  }
+
+  void
+  populateHALTargetBackends(IREE::HAL::TargetBackendList& targets) override {
+    targets.add(
+      "strela",
+      []() -> std::shared_ptr<IREE::HAL::TargetBackend> {
+        return std::make_shared<StrelaTargetBackend>();
+      }
+    );
+  }
+
+  void
+  populateHALTargetDevices(IREE::HAL::TargetDeviceList& targets) override {
+    targets.add(
+      "strela",
+      []() -> std::shared_ptr<IREE::HAL::TargetDevice> {
+        return std::make_shared<StrelaTargetDevice>();
+      }
+    );
   }
 };
 

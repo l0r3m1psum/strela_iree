@@ -57,6 +57,13 @@ iree-compile \
 	$pynq_flags \
 	matmul.mlir -o matmul_armv7a_strela.vmfb
 
+iree-compile \
+	--iree-plugin=example2 \
+	--iree-hal-target-backends=strela \
+	--iree-llvmcpu-link-embedded=false \
+	$pynq_flags \
+	3rdparty/iree/samples/models/simple_abs.mlir -o simple_abs_backend_strela.vmfb
+
 scp iree-build-arm/tools/iree-run-module \
 	build-arm/libcustom_module.so \
 	simple_abs_vmx.vmfb \
@@ -66,6 +73,7 @@ scp iree-build-arm/tools/iree-run-module \
 	ad01_int8_armv7a_strela.vmfb \
 	matmul_armv7a.vmfb \
 	matmul_armv7a_strela.vmfb \
+	simple_abs_backend_strela.vmfb \
 	"root@${ipaddr}:/root"
 ssh -t "root@${ipaddr}" << EOF
 	set -xe
@@ -107,5 +115,11 @@ ssh -t "root@${ipaddr}" << EOF
 		--function=main \
 		--input="1x1x1x9xi8=2" \
 		--input="9x1x1x9xi8=2" \
+		--device=local-sync
+	./iree-run-module \
+		--module=./libcustom_module.so \
+		--module=simple_abs_backend_strela.vmfb \
+		--function=abs \
+		--input="f32=-1" \
 		--device=local-sync
 EOF

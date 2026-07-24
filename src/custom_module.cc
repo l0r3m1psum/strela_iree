@@ -150,7 +150,14 @@ class CustomModuleState final {
         conf.out2_offset = sy.offset_words_from_base + i * N + j1; conf.out2_count = O1;
         conf.out3_offset = sy.offset_words_from_base + i * N + j2; conf.out3_count = O2;
 
-        // TODO configure just at the first and last iterations of the loop.
+        // TODO: configure just at the first and last iterations of the loop.
+        // TODO: The STRELA runtime library and driver should implement a
+        // command queue so that we can avoid doing many syscalls. A ring buffer
+        // can be shared between kernel and user space and it can be produced
+        // and consumed concurrently. The queue in the ideal case can be
+        // implemented as Single-Producer, Single-Consumer (SPSC) lock-free ring
+        // buffer. The consumption from the kernel side will be an
+        // interrupt-driven command pump.
         strela_config(dev, kernel, &conf);
         strela_execute(dev);
       }
