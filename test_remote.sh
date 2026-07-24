@@ -97,12 +97,12 @@ ssh -t "root@${ipaddr}" << EOF
 		--function=main \
 		--input="2x640xi8=0" \
 		--device=local-sync
-	# ./iree-run-module \
-	# 	--module=./libcustom_module.so \
-	# 	--module=ad01_int8_armv7a_strela.vmfb \
-	# 	--function=main \
-	# 	--input="2x640xi8=0" \
-	# 	--device=local-sync
+	./iree-run-module \
+		--module=./libcustom_module.so \
+		--module=ad01_int8_armv7a_strela.vmfb \
+		--function=main \
+		--input="2x640xi8=0" \
+		--device=local-sync
 	./iree-run-module \
 		--module=matmul_armv7a.vmfb \
 		--function=main \
