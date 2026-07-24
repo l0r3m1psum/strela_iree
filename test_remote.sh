@@ -97,12 +97,12 @@ ssh -t "root@${ipaddr}" << EOF
 		--function=main \
 		--input="2x640xi8=0" \
 		--device=local-sync
-	./iree-run-module \
-		--module=./libcustom_module.so \
-		--module=ad01_int8_armv7a_strela.vmfb \
-		--function=main \
-		--input="2x640xi8=0" \
-		--device=local-sync
+	# ./iree-run-module \
+	# 	--module=./libcustom_module.so \
+	# 	--module=ad01_int8_armv7a_strela.vmfb \
+	# 	--function=main \
+	# 	--input="2x640xi8=0" \
+	# 	--device=local-sync
 	./iree-run-module \
 		--module=matmul_armv7a.vmfb \
 		--function=main \
@@ -116,10 +116,13 @@ ssh -t "root@${ipaddr}" << EOF
 		--input="1x1x1x9xi8=2" \
 		--input="9x1x1x9xi8=2" \
 		--device=local-sync
+
+	./iree-run-module --list_drivers
+	./iree-run-module --list_devices=strela
 	./iree-run-module \
 		--module=./libcustom_module.so \
 		--module=simple_abs_backend_strela.vmfb \
 		--function=abs \
 		--input="f32=-1" \
-		--device=local-sync
+		--device=strela
 EOF

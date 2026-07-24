@@ -6,6 +6,7 @@ set_target_properties(strela PROPERTIES
   SKIP_BUILD_RPATH TRUE
 )
 
+set(_DEBUG_IREE_PACKAGE_NAME ON)
 iree_cc_library(
   NAME
     my_custom_hal_driver

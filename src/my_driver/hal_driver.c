@@ -16,6 +16,7 @@ typedef struct {
 
 typedef struct {
   iree_hal_resource_t resource;
+  iree_allocator_t host_allocator;
   strela_dev* dev;
 } strela_allocator_t;
 
@@ -51,11 +52,100 @@ strela_allocator_destroy(iree_hal_allocator_t *base_allocator) {
   // iree_allocator_free(allocator->host_allocator, allocator);
 }
 
+static iree_allocator_t
+strela_allocator_host_allocator(
+  const iree_hal_allocator_t *base_allocator
+) {
+  return ((strela_allocator_t *)base_allocator)->host_allocator;
+}
+
+static iree_status_t strela_allocator_trim(
+  iree_hal_allocator_t *base_allocator
+) {
+  return iree_ok_status(); // No-op
+}
+
+static void
+strela_allocator_deallocate_buffer(
+  iree_hal_allocator_t *base_allocator,
+  iree_hal_buffer_t *base_buffer
+) {
+  // We will implement this later when you handle actual memory freeing
+}
+
+static void
+strela_allocator_query_statistics(
+  iree_hal_allocator_t *base_allocator,
+  iree_hal_allocator_statistics_t *out_statistics
+) {
+  memset(out_statistics, 0, sizeof(*out_statistics));
+}
+
+static iree_status_t
+strela_allocator_query_memory_heaps(
+  iree_hal_allocator_t *base_allocator,
+  iree_host_size_t capacity,
+  iree_hal_allocator_memory_heap_t *heaps,
+  iree_host_size_t *out_count
+) {
+  *out_count = 1;
+  if (capacity > 0 && heaps != NULL) {
+    heaps[0].type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+    heaps[0].allowed_usage = IREE_HAL_BUFFER_USAGE_DEFAULT;
+    heaps[0].max_allocation_size = 1024 * 1024 * 256; // 256 MB max allocation size
+    heaps[0].min_alignment = 64;
+  }
+  return iree_ok_status();
+}
+
+static iree_hal_buffer_compatibility_t
+strela_allocator_query_buffer_compatibility(
+  iree_hal_allocator_t *base_allocator,
+  iree_hal_buffer_params_t *params,
+  iree_device_size_t *allocation_size
+) {
+  return IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE |
+         IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER;
+}
+
+static iree_status_t strela_allocator_import_buffer(
+  iree_hal_allocator_t* IREE_RESTRICT allocator,
+  const iree_hal_buffer_params_t* IREE_RESTRICT params,
+  iree_hal_external_buffer_t* IREE_RESTRICT external_buffer,
+  iree_hal_buffer_release_callback_t release_callback,
+  iree_hal_buffer_t** IREE_RESTRICT out_buffer
+) {
+  return iree_make_status(
+    IREE_STATUS_UNIMPLEMENTED,
+    "strela allocator does not support importing external buffers"
+  );
+}
+
+static iree_status_t strela_allocator_export_buffer(
+  iree_hal_allocator_t* IREE_RESTRICT allocator,
+  iree_hal_buffer_t* IREE_RESTRICT buffer,
+  iree_hal_external_buffer_type_t requested_type,
+  iree_hal_external_buffer_flags_t requested_flags,
+  iree_hal_external_buffer_t* IREE_RESTRICT out_external_buffer
+) {
+  return iree_make_status(
+    IREE_STATUS_UNIMPLEMENTED,
+    "strela allocator does not support exporting external buffers"
+  );
+}
+
 static const iree_hal_allocator_vtable_t
 strela_allocator_vtable = {
-  .destroy = strela_allocator_destroy,
-  .allocate_buffer = strela_allocator_allocate_buffer,
-  // Add other required allocator vtable methods here (free_buffer, map, etc.)
+  .destroy                    = strela_allocator_destroy,
+  .host_allocator             = strela_allocator_host_allocator,
+  .trim                       = strela_allocator_trim,
+  .query_statistics           = strela_allocator_query_statistics,
+  .query_memory_heaps         = strela_allocator_query_memory_heaps,
+  .query_buffer_compatibility = strela_allocator_query_buffer_compatibility,
+  .allocate_buffer            = strela_allocator_allocate_buffer,
+  .deallocate_buffer          = strela_allocator_deallocate_buffer,
+  .import_buffer              = strela_allocator_import_buffer,
+  .export_buffer              = strela_allocator_export_buffer,
 };
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -137,6 +227,7 @@ strela_device_create_command_buffer(
   iree_host_size_t binding_capacity,
   iree_hal_command_buffer_t **out_command_buffer
 ) {
+  printf("%s\n", __func__);
 
   strela_device_t *device = (strela_device_t*)base_device;
 
@@ -205,14 +296,68 @@ strela_device_allocator(iree_hal_device_t *base_device) {
   return device->strela_allocator;
 }
 
-// The device vtable exposes your allocator and command buffer factory to the VM.
+static iree_string_view_t
+strela_device_id(iree_hal_device_t *base_device) {
+  return ((strela_device_t *)base_device)->identifier;
+}
+
+static iree_allocator_t
+strela_device_host_allocator(iree_hal_device_t *base_device) {
+  return ((strela_device_t *)base_device)->host_allocator;
+}
+
+static iree_status_t
+strela_device_query_i64(
+  iree_hal_device_t *base_device,
+  iree_string_view_t category,
+  iree_string_view_t key,
+  int64_t *out_value
+) {
+  printf("%s\n", __func__);
+
+  // Tell the VM we have basic default capabilities for now
+  *out_value = 0;
+  return iree_ok_status();
+}
+
+static iree_status_t
+strela_device_create_semaphore(
+  iree_hal_device_t *base_device,
+  iree_hal_queue_affinity_t queue_affinity,
+  uint64_t initial_value,
+  iree_hal_semaphore_flags_t flags,
+  iree_hal_semaphore_t **out_semaphore
+) {
+  return iree_make_status(
+    IREE_STATUS_UNIMPLEMENTED,
+    "strela_device_create_semaphore not implemented yet"
+  );
+}
+
+static iree_status_t
+strela_device_create_executable_cache(
+  iree_hal_device_t* base_device,
+  iree_string_view_t identifier,
+  iree_hal_executable_cache_t** out_executable_cache
+) {
+  // iree-run-module will call this to load your .vmfb file
+  return iree_make_status(
+    IREE_STATUS_UNIMPLEMENTED,
+    "strela_device_create_executable_cache not implemented yet"
+  );
+}
+
 static const iree_hal_device_vtable_t
 strela_device_vtable = {
-  .destroy = strela_device_destroy,
-  .device_allocator = strela_device_allocator, // Returns device->strela_allocator
-  .create_command_buffer = strela_device_create_command_buffer,
-  .queue_execute = strela_device_queue_execute,
-  // ...
+  .destroy                 = strela_device_destroy,
+  .id                      = strela_device_id,
+  .host_allocator          = strela_device_host_allocator,
+  .device_allocator        = strela_device_allocator,
+  .query_i64               = strela_device_query_i64,
+  .create_semaphore        = strela_device_create_semaphore,
+  .create_executable_cache = strela_device_create_executable_cache,
+  .create_command_buffer   = strela_device_create_command_buffer,
+  .queue_execute           = strela_device_queue_execute,
 };
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -224,8 +369,9 @@ strela_allocator_create(
   iree_hal_allocator_t** out_allocator
 ) {
 
-  strela_allocator_t* allocator = NULL;
+  strela_allocator_t *allocator = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*allocator), (void**)&allocator));
+  memset(allocator, 0, sizeof (*allocator));
 
   // Initialize the resource tracking and map the vtable
   iree_hal_resource_initialize(&strela_allocator_vtable, &allocator->resource);
@@ -237,12 +383,20 @@ strela_allocator_create(
   return iree_ok_status();
 }
 
+typedef struct iree_hal_strela_device_options_t {
+  int reserved;
+} iree_hal_strela_device_options_t;
+
 typedef struct {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
+
+  iree_string_view_t identifier;
+  iree_hal_strela_device_options_t options;
+
+  // add stuff here
 } strela_driver_t;
 
-// This is called when the IREE runtime wants to instantiate your FPGA device.
 static iree_status_t
 strela_driver_create_device_by_id(
   iree_hal_driver_t* base_driver,
@@ -253,16 +407,20 @@ strela_driver_create_device_by_id(
   iree_allocator_t host_allocator,
   iree_hal_device_t** out_device
 ) {
+  printf("%s\n", __func__);
 
   [[maybe_unused]] strela_driver_t* driver = (strela_driver_t*)base_driver;
 
   // 1. Allocate your custom strela_device_t
   strela_device_t* device = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*device), (void**)&device));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof (*device), (void **)&device));
+  memset(device, 0, sizeof(*device));
 
-  // 2. Initialize the device vtable (which includes queue_execute)
+  // 2. Initialize the basics
   iree_hal_resource_initialize(&strela_device_vtable, &device->resource);
+  iree_string_view_t identifier = iree_string_view_literal("strela-fpga-0");
   device->host_allocator = host_allocator;
+  device->identifier = identifier;
 
   // 3. Initialize your custom allocator HERE. The device owns it.
   IREE_RETURN_IF_ERROR(strela_allocator_create(host_allocator, device->dev, &device->strela_allocator));
@@ -281,11 +439,64 @@ strela_driver_destroy(iree_hal_driver_t *base_driver) {
   iree_allocator_free(host_allocator, driver);
 }
 
+static iree_status_t
+strela_driver_query_available_devices(
+  iree_hal_driver_t *base_driver,
+  iree_allocator_t host_allocator,
+  iree_host_size_t *out_device_info_count,
+  iree_hal_device_info_t **out_device_infos
+) {
+
+  // We only have 1 FPGA device to expose
+  *out_device_info_count = 1;
+
+  iree_hal_device_info_t* device_infos = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*device_infos) * 1, (void**)&device_infos));
+
+  iree_string_view_t name = iree_string_view_literal("strela-fpga-0");
+  // Populate the dummy device info
+  device_infos[0].device_id = 0; // Just use ID 0 for the first device
+  device_infos[0].name = name;
+
+  *out_device_infos = device_infos;
+  return iree_ok_status();
+}
+
+static iree_status_t
+strela_driver_dump_device_info(
+  iree_hal_driver_t *base_driver,
+  iree_hal_device_id_t device_id,
+  iree_string_builder_t* builder
+) {
+  return iree_string_builder_append_cstring(builder, "STRELA Custom FPGA Accelerator\n");
+}
+
+static iree_status_t
+strela_driver_create_device_by_path(
+  iree_hal_driver_t *base_driver,
+  iree_string_view_t driver_name,
+  iree_string_view_t device_path,
+  iree_host_size_t param_count,
+  const iree_string_pair_t *params,
+  const iree_hal_device_create_params_t * device_create_params,
+  iree_allocator_t host_allocator,
+  iree_hal_device_t **out_device
+) {
+
+  // Fall back to creating by ID (ID 0)
+  return strela_driver_create_device_by_id(
+    base_driver, 0, param_count, params,
+    NULL, host_allocator, out_device
+  );
+}
+
 static const iree_hal_driver_vtable_t
 strela_driver_vtable = {
   .destroy = strela_driver_destroy,
+  .query_available_devices = strela_driver_query_available_devices,
+  .dump_device_info = strela_driver_dump_device_info,
   .create_device_by_id = strela_driver_create_device_by_id,
-  // ... other vtable methods (query_available_devices, etc.)
+  .create_device_by_path = strela_driver_create_device_by_path,
 };
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -296,6 +507,7 @@ strela_driver_factory_enumerate(
   iree_host_size_t* out_driver_info_count,
   const iree_hal_driver_info_t** out_driver_infos
 ) {
+  printf("%s\n", __func__);
 
   static const iree_hal_driver_info_t driver_info = {
     .driver_name = iree_string_view_literal("strela"),
@@ -313,6 +525,7 @@ strela_driver_factory_try_create(
   iree_allocator_t host_allocator,
   iree_hal_driver_t** out_driver
 ) {
+  printf("%s\n", __func__);
 
   iree_string_view_t strela_name = iree_string_view_literal("strela");
   if (!iree_string_view_equal(driver_name, strela_name)) {
@@ -322,20 +535,20 @@ strela_driver_factory_try_create(
     );
   }
 
-  // Allocate and initialize your strela_driver_t here
-  strela_driver_t* driver = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*driver), (void**)&driver));
+  strela_driver_t *driver = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof (*driver), (void**)&driver));
+  memset(driver, 0, sizeof(*driver));
   iree_hal_resource_initialize(&strela_driver_vtable, &driver->resource);
   driver->host_allocator = host_allocator;
+  driver->identifier = strela_name;
 
-  *out_driver = (iree_hal_driver_t*)driver;
+  *out_driver = (iree_hal_driver_t *)driver;
   return iree_ok_status();
 }
 
 IREE_API_EXPORT iree_status_t
-iree_hal_strela_driver_register(
-  iree_hal_driver_registry_t* registry, iree_allocator_t host_allocator
-) {
+iree_hal_my_driver_module_register(iree_hal_driver_registry_t *registry) {
+  printf("%s\n", __func__);
 
   static const iree_hal_driver_factory_t factory = {
       .self = NULL,
@@ -345,4 +558,5 @@ iree_hal_strela_driver_register(
 
   return iree_hal_driver_registry_register_factory(registry, &factory);
 }
+
 ////////////////////////////////////////////////////////////////////////////////

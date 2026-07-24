@@ -6,7 +6,7 @@ iree_register_external_hal_driver(
   BINARY_DIR
     "${CMAKE_CURRENT_BINARY_DIR}/my_driver"
   DRIVER_TARGET
-    my_custom_hal_driver
+    ..::..::..::..::src::my_driver::my_custom_hal_driver
   REGISTER_FN
     iree_hal_my_driver_module_register
 )
