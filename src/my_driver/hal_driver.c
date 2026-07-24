@@ -41,7 +41,7 @@ strela_allocator_allocate_buffer(
   // to return to the IREE Virtual Machine.
   // ...
 
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static void
@@ -62,7 +62,8 @@ strela_allocator_host_allocator(
 static iree_status_t strela_allocator_trim(
   iree_hal_allocator_t *base_allocator
 ) {
-  return iree_ok_status(); // No-op
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  // return iree_ok_status(); // No-op
 }
 
 static void
@@ -95,7 +96,8 @@ strela_allocator_query_memory_heaps(
     heaps[0].max_allocation_size = 1024 * 1024 * 256; // 256 MB max allocation size
     heaps[0].min_alignment = 64;
   }
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  // return iree_ok_status();
 }
 
 static iree_hal_buffer_compatibility_t
@@ -108,30 +110,26 @@ strela_allocator_query_buffer_compatibility(
          IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER;
 }
 
-static iree_status_t strela_allocator_import_buffer(
+static iree_status_t
+strela_allocator_import_buffer(
   iree_hal_allocator_t* IREE_RESTRICT allocator,
   const iree_hal_buffer_params_t* IREE_RESTRICT params,
   iree_hal_external_buffer_t* IREE_RESTRICT external_buffer,
   iree_hal_buffer_release_callback_t release_callback,
   iree_hal_buffer_t** IREE_RESTRICT out_buffer
 ) {
-  return iree_make_status(
-    IREE_STATUS_UNIMPLEMENTED,
-    "strela allocator does not support importing external buffers"
-  );
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
-static iree_status_t strela_allocator_export_buffer(
+static iree_status_t
+strela_allocator_export_buffer(
   iree_hal_allocator_t* IREE_RESTRICT allocator,
   iree_hal_buffer_t* IREE_RESTRICT buffer,
   iree_hal_external_buffer_type_t requested_type,
   iree_hal_external_buffer_flags_t requested_flags,
   iree_hal_external_buffer_t* IREE_RESTRICT out_external_buffer
 ) {
-  return iree_make_status(
-    IREE_STATUS_UNIMPLEMENTED,
-    "strela allocator does not support exporting external buffers"
-  );
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static const iree_hal_allocator_vtable_t
@@ -179,7 +177,7 @@ strela_command_buffer_dispatch(
   // Do NOT execute the hardware here!
   // ...
 
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static void
@@ -215,7 +213,7 @@ strela_command_buffer_create(
   // cmd->host_allocator = host_allocator; // Store this if added to the struct
 
   *out_command_buffer = (iree_hal_command_buffer_t*)cmd;
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
@@ -229,14 +227,14 @@ strela_device_create_command_buffer(
 ) {
   printf("%s\n", __func__);
 
-  strela_device_t *device = (strela_device_t*)base_device;
+  [[maybe_unused]] strela_device_t *device = (strela_device_t*)base_device;
 
-  // Allocate and return your custom strela_command_buffer_t
-  return strela_command_buffer_create(
-    device->host_allocator,
-    device->dev,
-    out_command_buffer
-  );
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  // return strela_command_buffer_create(
+  //   device->host_allocator,
+  //   device->dev,
+  //   out_command_buffer
+  // );
 }
 
 static void
@@ -287,7 +285,7 @@ strela_device_queue_execute(
 
   // 3. Signal the provided signal_semaphore_list to notify the VM of completion.
 
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_hal_allocator_t *
@@ -317,7 +315,8 @@ strela_device_query_i64(
 
   // Tell the VM we have basic default capabilities for now
   *out_value = 0;
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  // return iree_ok_status();
 }
 
 static iree_status_t
@@ -328,10 +327,7 @@ strela_device_create_semaphore(
   iree_hal_semaphore_flags_t flags,
   iree_hal_semaphore_t **out_semaphore
 ) {
-  return iree_make_status(
-    IREE_STATUS_UNIMPLEMENTED,
-    "strela_device_create_semaphore not implemented yet"
-  );
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
@@ -341,10 +337,7 @@ strela_device_create_executable_cache(
   iree_hal_executable_cache_t** out_executable_cache
 ) {
   // iree-run-module will call this to load your .vmfb file
-  return iree_make_status(
-    IREE_STATUS_UNIMPLEMENTED,
-    "strela_device_create_executable_cache not implemented yet"
-  );
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static const iree_hal_device_vtable_t
@@ -380,7 +373,8 @@ strela_allocator_create(
   // allocator->host_allocator = host_allocator; // Store this if added to the struct
 
   *out_allocator = (iree_hal_allocator_t*)allocator;
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  // return iree_ok_status();
 }
 
 typedef struct iree_hal_strela_device_options_t {
@@ -446,6 +440,7 @@ strela_driver_query_available_devices(
   iree_host_size_t *out_device_info_count,
   iree_hal_device_info_t **out_device_infos
 ) {
+  printf("%s\n", __func__);
 
   // We only have 1 FPGA device to expose
   *out_device_info_count = 1;
@@ -468,6 +463,8 @@ strela_driver_dump_device_info(
   iree_hal_device_id_t device_id,
   iree_string_builder_t* builder
 ) {
+  printf("%s\n", __func__);
+
   return iree_string_builder_append_cstring(builder, "STRELA Custom FPGA Accelerator\n");
 }
 
@@ -482,12 +479,13 @@ strela_driver_create_device_by_path(
   iree_allocator_t host_allocator,
   iree_hal_device_t **out_device
 ) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 
   // Fall back to creating by ID (ID 0)
-  return strela_driver_create_device_by_id(
-    base_driver, 0, param_count, params,
-    NULL, host_allocator, out_device
-  );
+  // return strela_driver_create_device_by_id(
+  //   base_driver, 0, param_count, params,
+  //   NULL, host_allocator, out_device
+  // );
 }
 
 static const iree_hal_driver_vtable_t
