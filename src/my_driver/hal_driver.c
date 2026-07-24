@@ -28,6 +28,9 @@ strela_allocator_allocate_buffer(
   iree_device_size_t allocation_size,
   iree_hal_buffer_t **out_buffer
 ) {
+  printf("%s\n", __func__);
+
+  // We have finally reached here!!! ///////////////////////////////////////////
 
   strela_allocator_t *allocator = (strela_allocator_t *)base_allocator;
 
@@ -243,7 +246,8 @@ strela_allocator_vtable = {
 
 ////////////////////////////////////////////////////////////////////////////////
 typedef struct {
-  iree_hal_resource_t resource;
+  iree_hal_command_buffer_t base;
+  iree_allocator_t host_allocator;
   // Internal ring buffer or array to store recorded STRELA commands
 } strela_command_buffer_t;
 
@@ -271,7 +275,7 @@ strela_command_buffer_dispatch(
   // Do NOT execute the hardware here!
   // ...
 
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  return iree_ok_status();
 }
 
 static void
@@ -282,33 +286,92 @@ strela_command_buffer_destroy(iree_hal_command_buffer_t* base_command_buffer) {
   // iree_allocator_free(cmd->host_allocator, cmd);
 }
 
+static iree_status_t
+strela_device_begin(iree_hal_command_buffer_t *command_buffer) {
+  return iree_ok_status();
+}
+
+static iree_status_t
+strela_device_end(iree_hal_command_buffer_t* command_buffer) {
+  return iree_ok_status();
+}
+
+static iree_status_t
+strela_device_begin_debug_group(iree_hal_command_buffer_t* command_buffer, iree_string_view_t label, iree_hal_label_color_t label_color, const iree_hal_label_location_t* location) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t
+strela_device_end_debug_group(iree_hal_command_buffer_t* command_buffer) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t
+strela_device_execution_barrier(iree_hal_command_buffer_t* command_buffer, iree_hal_execution_stage_t source_stage_mask, iree_hal_execution_stage_t target_stage_mask, iree_hal_execution_barrier_flags_t flags, iree_host_size_t memory_barrier_count, const iree_hal_memory_barrier_t* memory_barriers, iree_host_size_t buffer_barrier_count, const iree_hal_buffer_barrier_t* buffer_barriers) {
+  return iree_ok_status();
+}
+
+static iree_status_t
+strela_device_signal_event(iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event, iree_hal_execution_stage_t source_stage_mask) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t
+strela_device_reset_event(iree_hal_command_buffer_t* command_buffer, iree_hal_event_t* event, iree_hal_execution_stage_t source_stage_mask) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t
+strela_device_wait_events(iree_hal_command_buffer_t* command_buffer, iree_host_size_t event_count, const iree_hal_event_t** events, iree_hal_execution_stage_t source_stage_mask, iree_hal_execution_stage_t target_stage_mask, iree_host_size_t memory_barrier_count, const iree_hal_memory_barrier_t* memory_barriers, iree_host_size_t buffer_barrier_count, const iree_hal_buffer_barrier_t* buffer_barriers) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t
+strela_device_advise_buffer(iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t buffer_ref, iree_hal_memory_advise_flags_t flags, uint64_t arg0, uint64_t arg1) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t
+strela_device_fill_buffer(iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t target_ref, const void* pattern, iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t
+strela_device_update_buffer(iree_hal_command_buffer_t* command_buffer, const void* source_buffer, iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref, iree_hal_update_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t
+strela_device_copy_buffer(iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref, iree_hal_copy_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t
+strela_device_collective(iree_hal_command_buffer_t* command_buffer, iree_hal_channel_t* channel, iree_hal_collective_op_t op, uint32_t param, iree_hal_buffer_ref_t send_ref, iree_hal_buffer_ref_t recv_ref, iree_device_size_t element_count) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
 static const iree_hal_command_buffer_vtable_t
 strela_command_buffer_vtable = {
-  .destroy = strela_command_buffer_destroy,
-  .dispatch = strela_command_buffer_dispatch,
-  // FIXME: add missing stuff...
+  .destroy           = strela_command_buffer_destroy,
+  .begin             = strela_device_begin,
+  .end               = strela_device_end,
+  .begin_debug_group = strela_device_begin_debug_group,
+  .end_debug_group   = strela_device_end_debug_group,
+  .execution_barrier = strela_device_execution_barrier,
+  .signal_event      = strela_device_signal_event,
+  .reset_event       = strela_device_reset_event,
+  .wait_events       = strela_device_wait_events,
+  .advise_buffer     = strela_device_advise_buffer,
+  .fill_buffer       = strela_device_fill_buffer,
+  .update_buffer     = strela_device_update_buffer,
+  .copy_buffer       = strela_device_copy_buffer,
+  .collective        = strela_device_collective,
+  .dispatch          = strela_command_buffer_dispatch,
 };
 ////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
-static iree_status_t
-strela_command_buffer_create(
-  iree_allocator_t host_allocator,
-  strela_dev *dev,
-  iree_hal_command_buffer_t** out_command_buffer
-) {
-
-  strela_command_buffer_t* cmd = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *cmd, (void**)&cmd));
-
-  // Initialize the resource tracking and map the vtable
-  iree_hal_resource_initialize(&strela_command_buffer_vtable, &cmd->resource);
-
-  // cmd->host_allocator = host_allocator; // Store this if added to the struct
-
-  *out_command_buffer = (iree_hal_command_buffer_t*)cmd;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
-}
 
 static iree_status_t
 strela_device_create_command_buffer(
@@ -321,14 +384,33 @@ strela_device_create_command_buffer(
 ) {
   printf("%s\n", __func__);
 
-  [[maybe_unused]] strela_device_t *device = (strela_device_t*)base_device;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  *out_command_buffer = NULL;
+  strela_command_buffer_t* command_buffer = NULL;
+  iree_hal_allocator_t *device_allocator = iree_hal_device_allocator(base_device);
+  iree_allocator_t host_allocator = iree_hal_device_host_allocator(base_device);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_allocator_malloc(host_allocator,
+                            sizeof(*command_buffer) +
+                                iree_hal_command_buffer_validation_state_size(
+                                    mode, binding_capacity),
+                            (void**)&command_buffer));
+  iree_hal_command_buffer_initialize(
+      device_allocator, mode, command_categories, queue_affinity,
+      binding_capacity, (uint8_t*)command_buffer + sizeof *command_buffer,
+      &strela_command_buffer_vtable, &command_buffer->base);
+  command_buffer->host_allocator = host_allocator;
 
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
-  // return strela_command_buffer_create(
-  //   device->host_allocator,
-  //   device->dev,
-  //   out_command_buffer
-  // );
+  iree_status_t status = iree_ok_status();
+
+  if (iree_status_is_ok(status)) {
+    *out_command_buffer = &command_buffer->base;
+  } else {
+    iree_hal_command_buffer_release(&command_buffer->base);
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 static void
@@ -405,14 +487,37 @@ strela_device_query_i64(
   iree_string_view_t key,
   int64_t *out_value
 ) {
-  printf("%s\n", __func__);
+  printf(
+  "%s: category='%.*s', key='%.*s'\n", __func__,
+   (int)category.size, category.data, (int)key.size, key.data
+  );
 
-  // Tell the VM we have basic default capabilities for now
   *out_value = 0;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
-  // return iree_ok_status();
-}
 
+  iree_string_view_t hal_executable_format = iree_string_view_literal("hal.executable.format");
+  if (iree_string_view_equal(category, hal_executable_format)) {
+    iree_string_view_t value = iree_string_view_literal("custom");
+    if (iree_string_view_equal(key, value)) {
+      *out_value = 1;
+      return iree_ok_status();
+    }
+  }
+
+  iree_string_view_t hal_device_id = iree_string_view_literal("hal.device.id");
+  if (iree_string_view_equal(category, hal_device_id)) {
+    iree_string_view_t value = iree_string_view_literal("strela");
+    if (iree_string_view_equal(key, value)) {
+      *out_value = 1;
+      return iree_ok_status();
+    }
+  }
+
+  return iree_make_status(
+    IREE_STATUS_NOT_FOUND,
+    "unknown device property '%.*s'.'%.*s'",
+    (int)category.size, category.data, (int)key.size, key.data
+  );
+}
 static iree_status_t
 strela_device_create_semaphore(
   iree_hal_device_t *base_device,
@@ -424,14 +529,144 @@ strela_device_create_semaphore(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
+typedef struct iree_hal_null_executable_cache_t {
+  iree_hal_resource_t resource;
+  iree_allocator_t host_allocator;
+} iree_hal_null_executable_cache_t;
+
+static void
+strela_executable_cache_destroy(iree_hal_executable_cache_t* executable_cache) {
+  ;
+}
+
+static iree_status_t
+strela_executable_cache_infer_format(iree_hal_executable_cache_t* executable_cache, iree_hal_executable_caching_mode_t caching_mode, iree_const_byte_span_t executable_data, iree_host_size_t executable_format_capacity, char* executable_format, iree_host_size_t* out_inferred_size) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static bool
+strela_executable_cache_can_prepare_format(iree_hal_executable_cache_t* executable_cache, iree_hal_executable_caching_mode_t caching_mode, iree_string_view_t executable_format) {
+  return false;
+}
+
+// Define the underlying STRELA executable structure
+typedef struct {
+  iree_hal_resource_t resource;
+  iree_allocator_t host_allocator;
+  // TODO: Add fields here later to store your parsed STRELA binaries or kernel parameters
+} strela_executable_t;
+
+static void strela_executable_destroy(iree_hal_executable_t* base_executable) {
+  strela_executable_t* executable = (strela_executable_t*)base_executable;
+  iree_allocator_free(executable->host_allocator, executable);
+}
+
+static iree_host_size_t strela_executable_function_count(
+    iree_hal_executable_t* base_executable) {
+  // Stub: Pretend we successfully loaded 1 function
+  return 1;
+}
+
+static iree_status_t strela_executable_function_info(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function,
+    iree_hal_executable_function_info_t* out_info) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t strela_executable_function_parameters(
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function, iree_host_size_t capacity,
+    iree_hal_executable_function_parameter_t* out_parameters) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+static iree_status_t strela_executable_lookup_function_by_name(
+    iree_hal_executable_t *base_executable, iree_string_view_t name,
+    iree_hal_executable_function_t *out_function) {
+  printf("%s: looking up kernel '%.*s'\n", __func__, (int)name.size, name.data);
+
+  out_function->value = 1;
+  return iree_ok_status();
+}
+
+static iree_status_t strela_executable_lookup_global_by_name(
+    iree_hal_executable_t* base_executable, iree_string_view_t name,
+    iree_hal_queue_affinity_t queue_affinity, iree_hal_buffer_t** out_buffer) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+}
+
+// Map the stubs to the vtable
+static const iree_hal_executable_vtable_t strela_executable_vtable = {
+  .destroy = strela_executable_destroy,
+  .function_count = strela_executable_function_count,
+  .function_info = strela_executable_function_info,
+  .function_parameters = strela_executable_function_parameters,
+  .lookup_function_by_name = strela_executable_lookup_function_by_name,
+  .lookup_global_by_name = strela_executable_lookup_global_by_name,
+};
+
+static iree_status_t
+strela_executable_cache_prepare_executable(
+  iree_hal_executable_cache_t* executable_cache,
+  const iree_hal_executable_params_t* executable_params,
+  iree_hal_executable_t** out_executable
+) {
+  printf("%s\n", __func__);
+
+  // If you don't have a custom cache struct with a host_allocator yet,
+  // you can safely fall back to the system allocator for this stub.
+  iree_allocator_t host_allocator = iree_allocator_system();
+
+  strela_executable_t* executable = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*executable), (void**)&executable));
+
+  // Initialize the base resource using your new vtable
+  iree_hal_resource_initialize(&strela_executable_vtable, &executable->resource);
+  executable->host_allocator = host_allocator;
+
+  // Pass the allocated and initialized executable back to IREE
+  *out_executable = (iree_hal_executable_t*)executable;
+
+  return iree_ok_status();
+}
+
+static const iree_hal_executable_cache_vtable_t
+iree_hal_null_executable_cache_vtable = {
+  .destroy = strela_executable_cache_destroy,
+  .infer_format = strela_executable_cache_infer_format,
+  .can_prepare_format = strela_executable_cache_can_prepare_format,
+  .prepare_executable = strela_executable_cache_prepare_executable,
+};
+
 static iree_status_t
 strela_device_create_executable_cache(
-  iree_hal_device_t* base_device,
+  iree_hal_device_t *base_device,
   iree_string_view_t identifier,
-  iree_hal_executable_cache_t** out_executable_cache
+  iree_hal_executable_cache_t **out_executable_cache
 ) {
-  // iree-run-module will call this to load your .vmfb file
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  *out_executable_cache = NULL;
+  iree_allocator_t host_allocator = iree_hal_device_host_allocator(base_device);
+  iree_hal_null_executable_cache_t *executable_cache = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_allocator_malloc(host_allocator, sizeof(*executable_cache),
+                                (void**)&executable_cache));
+  iree_hal_resource_initialize(&iree_hal_null_executable_cache_vtable,
+                               &executable_cache->resource);
+  executable_cache->host_allocator = host_allocator;
+
+  iree_status_t status = iree_ok_status();
+
+  if (iree_status_is_ok(status)) {
+    *out_executable_cache = (iree_hal_executable_cache_t*)executable_cache;
+  } else {
+    iree_hal_executable_cache_release(
+        (iree_hal_executable_cache_t*)executable_cache);
+  }
+  IREE_TRACE_ZONE_END(z0);
+
+  return status;
 }
 
 static iree_status_t
@@ -440,8 +675,12 @@ strela_device_trim(iree_hal_device_t* device) {
 }
 
 static iree_status_t
-strela_device_query_capabilities(iree_hal_device_t* device, iree_hal_device_capabilities_t* out_capabilities) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+strela_device_query_capabilities(
+  iree_hal_device_t* device,
+  iree_hal_device_capabilities_t* out_capabilities
+) {
+  memset(out_capabilities, 0, sizeof *out_capabilities);
+  return iree_ok_status();
 }
 
 static iree_status_t
@@ -451,7 +690,7 @@ strela_device_refine_topology_edge(iree_hal_device_t* src_device, iree_hal_devic
 
 static iree_status_t
 strela_device_assign_topology_info(iree_hal_device_t* device, const iree_hal_device_topology_info_t* topology_info) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  return iree_ok_status();
 }
 
 static iree_status_t
@@ -822,5 +1061,4 @@ iree_hal_my_driver_module_register(iree_hal_driver_registry_t *registry) {
 
   return iree_hal_driver_registry_register_factory(registry, &factory);
 }
-
 ////////////////////////////////////////////////////////////////////////////////

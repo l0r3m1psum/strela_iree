@@ -117,8 +117,8 @@ ssh -t "root@${ipaddr}" << EOF
 		--input="9x1x1x9xi8=2" \
 		--device=local-sync
 
-	./iree-run-module --list_drivers
-	./iree-run-module --list_devices=strela
+	./iree-run-module --list_drivers 2>&1
+	./iree-run-module --list_devices=strela 2>&1
 	./iree-run-module \
 		--module=./libcustom_module.so \
 		--module=simple_abs_backend_strela.vmfb \
