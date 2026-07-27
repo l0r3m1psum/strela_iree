@@ -125,6 +125,10 @@ strela_allocator_allocate_buffer(
   buffer->host_ptr = host_ptr;
   buffer->release_callback = (iree_hal_buffer_release_callback_t){0};
 
+  iree_hal_memory_type_t actual_type = params->type | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  iree_hal_memory_access_t actual_access = IREE_HAL_MEMORY_ACCESS_ALL; // <--- The Fix
+  iree_hal_buffer_usage_t actual_usage = params->usage | IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_MAPPING;
+
   // 3. Initialize the base IREE buffer tracking fields
   iree_hal_buffer_initialize(
     iree_hal_buffer_placement_undefined(),
@@ -132,9 +136,9 @@ strela_allocator_allocate_buffer(
     allocation_size,                  // Total allocation size
     0,                                // Byte offset
     allocation_size,                  // Byte length
-    params->type,                     // Memory type (host-visible, device-local, etc.)
-    params->access,                   // Allowed access (read/write)
-    params->usage,                    // Allowed usage (transfer, dispatch)
+    actual_type,                     // Memory type (host-visible, device-local, etc.)
+    actual_access,                   // Allowed access (read/write)
+    actual_usage,                    // Allowed usage (transfer, dispatch)
     &strela_buffer_vtable,            // Your custom vtable
     &buffer->base                     // Output pointer to the base iree_hal_buffer_t
   );
@@ -207,6 +211,11 @@ strela_allocator_query_buffer_compatibility(
   iree_hal_buffer_params_t *params,
   iree_device_size_t *allocation_size
 ) {
+
+  params->type |= IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+  params->access = IREE_HAL_MEMORY_ACCESS_ALL; // Grants READ and WRITE
+  params->usage |= IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_MAPPING;
+
   return IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE
     | IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER
     | IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH
@@ -380,8 +389,8 @@ strela_command_buffer_dispatch(
 }
 
 static void
-strela_command_buffer_destroy(iree_hal_command_buffer_t* base_command_buffer) {
-  [[maybe_unused]] strela_command_buffer_t* cmd = (strela_command_buffer_t*)base_command_buffer;
+strela_command_buffer_destroy(iree_hal_command_buffer_t *base_command_buffer) {
+  [[maybe_unused]] strela_command_buffer_t *cmd = (strela_command_buffer_t *)base_command_buffer;
 
   // NOTE: Assuming you add `iree_allocator_t host_allocator` to strela_command_buffer_t
   // iree_allocator_free(cmd->host_allocator, cmd);
@@ -389,11 +398,13 @@ strela_command_buffer_destroy(iree_hal_command_buffer_t* base_command_buffer) {
 
 static iree_status_t
 strela_device_begin(iree_hal_command_buffer_t *command_buffer) {
+  printf("%s\n", __func__);
   return iree_ok_status();
 }
 
 static iree_status_t
-strela_device_end(iree_hal_command_buffer_t* command_buffer) {
+strela_device_end(iree_hal_command_buffer_t *command_buffer) {
+  printf("%s\n", __func__);
   return iree_ok_status();
 }
 
@@ -408,7 +419,17 @@ strela_device_end_debug_group(iree_hal_command_buffer_t* command_buffer) {
 }
 
 static iree_status_t
-strela_device_execution_barrier(iree_hal_command_buffer_t* command_buffer, iree_hal_execution_stage_t source_stage_mask, iree_hal_execution_stage_t target_stage_mask, iree_hal_execution_barrier_flags_t flags, iree_host_size_t memory_barrier_count, const iree_hal_memory_barrier_t* memory_barriers, iree_host_size_t buffer_barrier_count, const iree_hal_buffer_barrier_t* buffer_barriers) {
+strela_device_execution_barrier(
+  iree_hal_command_buffer_t *command_buffer,
+  iree_hal_execution_stage_t source_stage_mask,
+  iree_hal_execution_stage_t target_stage_mask,
+  iree_hal_execution_barrier_flags_t flags,
+  iree_host_size_t memory_barrier_count,
+  const iree_hal_memory_barrier_t *memory_barriers,
+  iree_host_size_t buffer_barrier_count,
+  const iree_hal_buffer_barrier_t *buffer_barriers
+) {
+  printf("%s\n", __func__);
   return iree_ok_status();
 }
 
@@ -443,8 +464,14 @@ strela_device_update_buffer(iree_hal_command_buffer_t* command_buffer, const voi
 }
 
 static iree_status_t
-strela_device_copy_buffer(iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref, iree_hal_copy_flags_t flags) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+strela_device_copy_buffer(
+  iree_hal_command_buffer_t *command_buffer,
+  iree_hal_buffer_ref_t source_ref,
+  iree_hal_buffer_ref_t target_ref,
+  iree_hal_copy_flags_t flags
+) {
+  printf("%s\n", __func__);
+  return iree_ok_status();
 }
 
 static iree_status_t
@@ -476,6 +503,7 @@ strela_command_buffer_vtable = {
 typedef struct strela_semaphore_t {
   iree_async_semaphore_t async;
   iree_allocator_t host_allocator;
+  iree_atomic_int64_t payload_value;
 } strela_semaphore_t;
 
 static iree_status_t
@@ -499,18 +527,36 @@ strela_semaphore_destroy(iree_async_semaphore_t* semaphore) {
 }
 
 static uint64_t
-strela_semaphore_query(iree_async_semaphore_t* semaphore) {
-  printf("%s\n", __func__);
-  return 0;
+strela_semaphore_query(iree_async_semaphore_t *base_semaphore) {
+  strela_semaphore_t* semaphore = (strela_semaphore_t*)base_semaphore;
+  return iree_atomic_load(&semaphore->payload_value, iree_memory_order_acquire);
 }
 
 static iree_status_t
 strela_semaphore_signal(
-  iree_async_semaphore_t *semaphore,
+  iree_async_semaphore_t *base_semaphore,
   uint64_t value,
   const iree_async_frontier_t* frontier
 ) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  printf("%s: signaling to %llu\n", __func__, (unsigned long long)value);
+
+  strela_semaphore_t* semaphore = (strela_semaphore_t*)base_semaphore;
+
+  // 1. Advance the simulated host-side tracking value.
+  iree_atomic_store(&semaphore->payload_value, value, iree_memory_order_release);
+
+  // 2. Notify the hardware (if you had a real device-side timeline semaphore).
+  // strela_hw_signal_semaphore(..., value);
+
+  iree_async_semaphore_advance_timeline(base_semaphore, value, frontier);
+
+  // 3. Wake up the async proactor.
+  // Note: Depending on your exact IREE revision, the base `iree_async_semaphore_t`
+  // might automatically resolve waiting nodes when this vtable hook returns `OK`,
+  // or you might need to explicitly call a proactor wake-up function like:
+  // iree_async_semaphore_advance(base_semaphore, value, frontier);
+
+  return iree_ok_status();
 }
 
 static void
@@ -712,6 +758,8 @@ strela_device_create_semaphore(
     device->proactor, initial_value, frontier_offset, 0, &semaphore->async
   );
   semaphore->host_allocator = device->host_allocator;
+
+  iree_atomic_store(&semaphore->payload_value, initial_value, iree_memory_order_release);
 
   *out_semaphore = (iree_hal_semaphore_t *) &semaphore->async;
   IREE_TRACE_ZONE_END(z0);

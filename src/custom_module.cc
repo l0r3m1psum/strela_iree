@@ -307,7 +307,7 @@ iree_vm_dynamic_module_create(
 // Hackity hack
 #include <cstdint>
 extern "C" {
-  void* backtrace_create_state(const char *filename, int threaded,
+  void *backtrace_create_state(const char *filename, int threaded,
                                void (*error_callback) (void *data, const char *msg, int errnum),
                                void *data) {
     return nullptr;
