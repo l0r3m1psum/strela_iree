@@ -13,6 +13,7 @@ sudo apt install cmake ninja-build clang lld libstdc++-13-dev-armhf-cross
 
 sudo apt install python3-venv
 
+# from https://bazel.build/install/ubuntu#add-dis-uri
 sudo apt install apt-transport-https curl gnupg -y
 curl -fsSL https://releases.bazel.build/bazel-release.pub.gpg | gpg --dearmor >bazel-archive-keyring.gpg
 sudo mv bazel-archive-keyring.gpg /usr/share/keyrings
