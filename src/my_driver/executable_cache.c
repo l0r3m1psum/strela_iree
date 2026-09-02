@@ -4,17 +4,28 @@ typedef struct iree_hal_null_executable_cache_t {
 } iree_hal_null_executable_cache_t;
 
 static void
-strela_executable_cache_destroy(iree_hal_executable_cache_t* executable_cache) {
+strela_executable_cache_destroy(iree_hal_executable_cache_t *executable_cache) {
   ;
 }
 
 static iree_status_t
-strela_executable_cache_infer_format(iree_hal_executable_cache_t* executable_cache, iree_hal_executable_caching_mode_t caching_mode, iree_const_byte_span_t executable_data, iree_host_size_t executable_format_capacity, char* executable_format, iree_host_size_t* out_inferred_size) {
+strela_executable_cache_infer_format(
+  iree_hal_executable_cache_t *executable_cache,
+  iree_hal_executable_caching_mode_t caching_mode,
+  iree_const_byte_span_t executable_data,
+  iree_host_size_t executable_format_capacity,
+  char *executable_format,
+  iree_host_size_t *out_inferred_size
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static bool
-strela_executable_cache_can_prepare_format(iree_hal_executable_cache_t* executable_cache, iree_hal_executable_caching_mode_t caching_mode, iree_string_view_t executable_format) {
+strela_executable_cache_can_prepare_format(
+  iree_hal_executable_cache_t *executable_cache,
+  iree_hal_executable_caching_mode_t caching_mode,
+  iree_string_view_t executable_format
+) {
   printf("%s\n", __func__);
   iree_string_view_t custom = iree_string_view_literal("custom");
   return iree_string_view_equal(executable_format, custom);
@@ -22,9 +33,9 @@ strela_executable_cache_can_prepare_format(iree_hal_executable_cache_t* executab
 
 static iree_status_t
 strela_executable_cache_prepare_executable(
-  iree_hal_executable_cache_t* executable_cache,
-  const iree_hal_executable_params_t* executable_params,
-  iree_hal_executable_t** out_executable
+  iree_hal_executable_cache_t *executable_cache,
+  const iree_hal_executable_params_t *executable_params,
+  iree_hal_executable_t **out_executable
 ) {
   printf("%s\n", __func__);
 

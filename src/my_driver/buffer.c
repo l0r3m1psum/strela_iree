@@ -4,7 +4,7 @@ typedef struct strela_buffer_t {
   iree_hal_buffer_release_callback_t release_callback;
 
   strela_buffer s_buf;
-  void* host_ptr;
+  void *host_ptr;
 } strela_buffer_t;
 
 static void
@@ -39,18 +39,31 @@ strela_buffer_map_range(
 }
 
 static iree_status_t
-strela_buffer_unmap_range(iree_hal_buffer_t* buffer, iree_device_size_t local_byte_offset, iree_device_size_t local_byte_length, iree_hal_buffer_mapping_t* mapping) {
+strela_buffer_unmap_range(
+  iree_hal_buffer_t *buffer,
+  iree_device_size_t local_byte_offset,
+  iree_device_size_t local_byte_length,
+  iree_hal_buffer_mapping_t *mapping
+) {
   printf("%s\n", __func__);
   return iree_ok_status();
 }
 
 static iree_status_t
-strela_buffer_invalidate_range(iree_hal_buffer_t* buffer, iree_device_size_t local_byte_offset, iree_device_size_t local_byte_length) {
+strela_buffer_invalidate_range(
+  iree_hal_buffer_t *buffer,
+  iree_device_size_t local_byte_offset,
+  iree_device_size_t local_byte_length
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
-strela_buffer_flush_range(iree_hal_buffer_t* buffer, iree_device_size_t local_byte_offset, iree_device_size_t local_byte_length) {
+strela_buffer_flush_range(
+  iree_hal_buffer_t *buffer,
+  iree_device_size_t local_byte_offset,
+  iree_device_size_t local_byte_length
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 

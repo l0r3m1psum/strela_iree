@@ -1,24 +1,3 @@
-static iree_status_t
-strela_allocator_create(
-  iree_allocator_t host_allocator,
-  strela_dev *dev,
-  iree_hal_allocator_t** out_allocator
-) {
-
-  strela_allocator_t *allocator = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *allocator, (void**)&allocator));
-  memset(allocator, 0, sizeof *allocator);
-
-  // Initialize the resource tracking and map the vtable
-  iree_hal_resource_initialize(&strela_allocator_vtable, &allocator->resource);
-
-  allocator->dev = dev;
-  allocator->host_allocator = host_allocator;
-
-  *out_allocator = (iree_hal_allocator_t*)allocator;
-  return iree_ok_status();
-}
-
 typedef struct iree_hal_strela_device_options_t {
   int reserved;
 } iree_hal_strela_device_options_t;
@@ -35,13 +14,13 @@ typedef struct {
 
 static iree_status_t
 strela_driver_create_device_by_id(
-  iree_hal_driver_t* base_driver,
+  iree_hal_driver_t *base_driver,
   iree_hal_device_id_t device_id,
   iree_host_size_t param_count,
-  const iree_string_pair_t* params,
+  const iree_string_pair_t *params,
   const iree_hal_device_create_params_t *device_create_params,
   iree_allocator_t host_allocator,
-  iree_hal_device_t** out_device
+  iree_hal_device_t **out_device
 ) {
   printf("%s\n", __func__);
 
@@ -58,8 +37,18 @@ strela_driver_create_device_by_id(
   device->host_allocator = host_allocator;
   device->identifier = identifier;
 
-  // 3. Initialize your custom allocator HERE. The device owns it.
-  IREE_RETURN_IF_ERROR(strela_allocator_create(host_allocator, device->dev, &device->device_allocator));
+  {
+    strela_allocator_t *allocator = NULL;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *allocator, (void**)&allocator));
+    memset(allocator, 0, sizeof *allocator);
+
+    iree_hal_resource_initialize(&strela_allocator_vtable, &allocator->resource);
+
+    allocator->dev = device->dev;
+    allocator->host_allocator = host_allocator;
+
+    device->device_allocator = (iree_hal_allocator_t *)allocator;
+  }
 
   *out_device = (iree_hal_device_t*)device;
   return iree_ok_status();
@@ -117,7 +106,7 @@ strela_driver_create_device_by_path(
   iree_string_view_t device_path,
   iree_host_size_t param_count,
   const iree_string_pair_t *params,
-  const iree_hal_device_create_params_t * device_create_params,
+  const iree_hal_device_create_params_t *device_create_params,
   iree_allocator_t host_allocator,
   iree_hal_device_t **out_device
 ) {

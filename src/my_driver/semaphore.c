@@ -5,22 +5,39 @@ typedef struct strela_semaphore_t {
 } strela_semaphore_t;
 
 static iree_status_t
-strela_semaphore_wait(iree_hal_semaphore_t* semaphore, uint64_t value, iree_timeout_t timeout, iree_async_wait_flags_t flags) {
+strela_semaphore_wait(
+  iree_hal_semaphore_t *semaphore,
+  uint64_t value,
+  iree_timeout_t timeout,
+  iree_async_wait_flags_t flags
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
-strela_semaphore_import_timepoint(iree_hal_semaphore_t* semaphore, uint64_t value, iree_hal_queue_affinity_t queue_affinity, iree_hal_external_timepoint_t external_timepoint) {
+strela_semaphore_import_timepoint(
+  iree_hal_semaphore_t *semaphore,
+  uint64_t value,
+  iree_hal_queue_affinity_t queue_affinity,
+  iree_hal_external_timepoint_t external_timepoint
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
-strela_semaphore_export_timepoint(iree_hal_semaphore_t* semaphore, uint64_t value, iree_hal_queue_affinity_t queue_affinity, iree_hal_external_timepoint_type_t requested_type, iree_hal_external_timepoint_flags_t requested_flags, iree_hal_external_timepoint_t* IREE_RESTRICT out_external_timepoint) {
+strela_semaphore_export_timepoint(
+  iree_hal_semaphore_t *semaphore,
+  uint64_t value,
+  iree_hal_queue_affinity_t queue_affinity,
+  iree_hal_external_timepoint_type_t requested_type,
+  iree_hal_external_timepoint_flags_t requested_flags,
+  iree_hal_external_timepoint_t *IREE_RESTRICT out_external_timepoint
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static void
-strela_semaphore_destroy(iree_async_semaphore_t* semaphore) {
+strela_semaphore_destroy(iree_async_semaphore_t *semaphore) {
   printf("%s\n", __func__);
 }
 
@@ -34,7 +51,7 @@ static iree_status_t
 strela_semaphore_signal(
   iree_async_semaphore_t *base_semaphore,
   uint64_t value,
-  const iree_async_frontier_t* frontier
+  const iree_async_frontier_t *frontier
 ) {
   printf("%s: signaling to %llu\n", __func__, (unsigned long long)value);
 
@@ -58,7 +75,10 @@ strela_semaphore_signal(
 }
 
 static void
-strela_semaphore_on_fail(iree_async_semaphore_t* semaphore, iree_status_code_t status_code) {
+strela_semaphore_on_fail(
+  iree_async_semaphore_t *semaphore,
+  iree_status_code_t status_code
+) {
   printf("%s\n", __func__);
 }
 

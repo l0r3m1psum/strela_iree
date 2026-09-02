@@ -38,7 +38,7 @@ strela_allocator_allocate_buffer(
   buffer->release_callback = (iree_hal_buffer_release_callback_t){0};
 
   iree_hal_memory_type_t actual_type = params->type | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  iree_hal_memory_access_t actual_access = IREE_HAL_MEMORY_ACCESS_ALL; // <--- The Fix
+  iree_hal_memory_access_t actual_access = IREE_HAL_MEMORY_ACCESS_ALL;
   iree_hal_buffer_usage_t actual_usage = params->usage | IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_MAPPING;
 
   // 3. Initialize the base IREE buffer tracking fields
@@ -76,7 +76,8 @@ strela_allocator_host_allocator(
   return ((strela_allocator_t *)base_allocator)->host_allocator;
 }
 
-static iree_status_t strela_allocator_trim(
+static iree_status_t
+strela_allocator_trim(
   iree_hal_allocator_t *base_allocator
 ) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
@@ -136,107 +137,117 @@ strela_allocator_query_buffer_compatibility(
 
 static iree_status_t
 strela_allocator_import_buffer(
-  iree_hal_allocator_t* IREE_RESTRICT allocator,
-  const iree_hal_buffer_params_t* IREE_RESTRICT params,
-  iree_hal_external_buffer_t* IREE_RESTRICT external_buffer,
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  const iree_hal_buffer_params_t *IREE_RESTRICT params,
+  iree_hal_external_buffer_t *IREE_RESTRICT external_buffer,
   iree_hal_buffer_release_callback_t release_callback,
-  iree_hal_buffer_t** IREE_RESTRICT out_buffer
+  iree_hal_buffer_t **IREE_RESTRICT out_buffer
 ) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_export_buffer(
-  iree_hal_allocator_t* IREE_RESTRICT allocator,
-  iree_hal_buffer_t* IREE_RESTRICT buffer,
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_buffer_t *IREE_RESTRICT buffer,
   iree_hal_external_buffer_type_t requested_type,
   iree_hal_external_buffer_flags_t requested_flags,
-  iree_hal_external_buffer_t* IREE_RESTRICT out_external_buffer
+  iree_hal_external_buffer_t *IREE_RESTRICT out_external_buffer
 ) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static bool
 strela_allocator_supports_virtual_memory(
-      iree_hal_allocator_t* IREE_RESTRICT allocator) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_virtual_memory_query_granularity(
-      iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_buffer_params_t params,
-      iree_device_size_t* IREE_RESTRICT out_minimum_page_size,
-      iree_device_size_t* IREE_RESTRICT out_recommended_page_size) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_buffer_params_t params,
+  iree_device_size_t *IREE_RESTRICT out_minimum_page_size,
+  iree_device_size_t *IREE_RESTRICT out_recommended_page_size
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_virtual_memory_reserve(
-      iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
-      iree_hal_buffer_t** IREE_RESTRICT out_virtual_buffer) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
+  iree_hal_buffer_t **IREE_RESTRICT out_virtual_buffer
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_virtual_memory_release(
-      iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_buffer_t* IREE_RESTRICT virtual_buffer) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_buffer_t *IREE_RESTRICT virtual_buffer
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_physical_memory_allocate(
-      iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_buffer_params_t params, iree_device_size_t size,
-      iree_allocator_t host_allocator,
-      iree_hal_physical_memory_t** IREE_RESTRICT out_physical_memory) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_buffer_params_t params, iree_device_size_t size,
+  iree_allocator_t host_allocator,
+  iree_hal_physical_memory_t **IREE_RESTRICT out_physical_memory
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_physical_memory_free(
-      iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_physical_memory_t* IREE_RESTRICT physical_memory) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_physical_memory_t *IREE_RESTRICT physical_memory
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_virtual_memory_map(
-      iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
-      iree_device_size_t virtual_offset,
-      iree_hal_physical_memory_t* IREE_RESTRICT physical_memory,
-      iree_device_size_t physical_offset, iree_device_size_t size) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_buffer_t *IREE_RESTRICT virtual_buffer,
+  iree_device_size_t virtual_offset,
+  iree_hal_physical_memory_t *IREE_RESTRICT physical_memory,
+  iree_device_size_t physical_offset, iree_device_size_t size
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_virtual_memory_unmap(
-      iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
-      iree_device_size_t virtual_offset, iree_device_size_t size) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_buffer_t *IREE_RESTRICT virtual_buffer,
+  iree_device_size_t virtual_offset, iree_device_size_t size
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_virtual_memory_protect(
-      iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
-      iree_device_size_t virtual_offset, iree_device_size_t size,
-      iree_hal_queue_affinity_t queue_affinity,
-      iree_hal_memory_protection_t protection) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_buffer_t *IREE_RESTRICT virtual_buffer,
+  iree_device_size_t virtual_offset, iree_device_size_t size,
+  iree_hal_queue_affinity_t queue_affinity,
+  iree_hal_memory_protection_t protection
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 strela_allocator_virtual_memory_advise(
-      iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
-      iree_device_size_t virtual_offset, iree_device_size_t size,
-      iree_hal_queue_affinity_t queue_affinity,
-      iree_hal_memory_advice_t advice) {
+  iree_hal_allocator_t *IREE_RESTRICT allocator,
+  iree_hal_buffer_t *IREE_RESTRICT virtual_buffer,
+  iree_device_size_t virtual_offset, iree_device_size_t size,
+  iree_hal_queue_affinity_t queue_affinity,
+  iree_hal_memory_advice_t advice
+) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
