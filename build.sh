@@ -35,6 +35,9 @@ cmake --build iree-build-arm
 cmake -G Ninja -S src -B build \
     -DIREERuntime_DIR="${PWD}/iree-build/lib/cmake/IREE"
 
+# NOTE: this now fails because strela.h is not available when building on x86_84
+# the header file is conditionally made visible by the CMakeLists.txt (a bit of
+# mess I know)
 cmake --build build
 
 cmake -G Ninja -S src -B build-arm \
@@ -46,6 +49,6 @@ cmake --build build-arm
 (
 	cd 3rdparty/tosa-converter-for-tflite
 	pip wheel .
-	mv "tosa_converter_for_tflite-*.whl" ../..
-	pip install "tosa_converter_for_tflite-*.whl"
+	mv tosa_converter_for_tflite-*.whl ../..
+	pip install tosa_converter_for_tflite-*.whl
 )
