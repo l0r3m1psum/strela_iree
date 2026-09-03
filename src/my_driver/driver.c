@@ -1,5 +1,3 @@
-#include "iree/async/util/proactor_pool.h"
-
 typedef struct iree_hal_strela_driver_options_t {
   int reserved;
 } iree_hal_strela_driver_options_t;
@@ -69,9 +67,13 @@ iree_hal_strela_driver_create(
     );
 
     memcpy(&driver->options, options, sizeof *options);
-
-    *out_driver = (iree_hal_driver_t *)driver;
   }
+
+  if (!iree_status_is_ok(status) && driver) {
+    iree_hal_driver_release((iree_hal_driver_t *)driver);
+  }
+
+  *out_driver = (iree_hal_driver_t *)driver;
 
   return status;
 }
@@ -95,14 +97,14 @@ iree_hal_strela_driver_query_available_devices(
 ) {
   printf("%s\n", __func__);
 
-  iree_status_t res = iree_ok_status();
+  iree_status_t status = iree_ok_status();
 
   unsigned count = 0;
   if (strela_device_count(&count) == -1) {
-    res = iree_status_from_code(IREE_STATUS_NOT_FOUND);
+    status = iree_status_from_code(IREE_STATUS_NOT_FOUND);
   }
 
-  if (iree_status_is_ok(res)) {
+  if (iree_status_is_ok(status)) {
     // TODO: is count != 0 we should return all the available devices.
     static const iree_hal_device_info_t device_infos[1] = {
       {
@@ -110,7 +112,7 @@ iree_hal_strela_driver_query_available_devices(
         .name = iree_string_view_literal("default_strela"),
       },
     };
-    res = iree_allocator_clone(
+    status = iree_allocator_clone(
       host_allocator,
       iree_make_const_byte_span(device_infos, sizeof device_infos),
       (void **)out_device_infos
@@ -118,7 +120,7 @@ iree_hal_strela_driver_query_available_devices(
     *out_device_info_count = IREE_ARRAYSIZE(device_infos);
   }
 
-  return res;
+  return status;
 }
 
 static iree_status_t
@@ -146,50 +148,16 @@ iree_hal_strela_driver_create_device_by_id(
   iree_hal_device_t **out_device
 ) {
   printf("%s\n", __func__);
+  iree_hal_strela_driver_t *driver = iree_hal_strela_driver_cast(base_driver);
 
-  iree_hal_strela_driver_t* driver = iree_hal_strela_driver_cast(base_driver);
+  iree_hal_strela_device_options_t options;
+  iree_hal_strela_device_options_initialize(&options);
 
   (void)driver;
 
-  iree_hal_strela_device_t *device = NULL;
-  // TODO: implement iree_hal_strela_device_create
-  {
-    iree_host_size_t total_size = sizeof(*device) + driver->identifier.size;
-    IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total_size, (void**)&device)
-    );
-    iree_hal_resource_initialize(&iree_hal_strela_device_vtable, &device->resource);
-    iree_string_view_append_to_buffer(
-      driver->identifier, &device->identifier,
-      (char*)device + total_size - driver->identifier.size
-    );
-    device->host_allocator = host_allocator;
-    device->proactor_pool = device_create_params->proactor_pool;
-    iree_async_proactor_pool_retain(device->proactor_pool);
-    iree_atomic_store(&device->epoch, 0, iree_memory_order_relaxed);
-    iree_status_t status = iree_async_proactor_pool_get(
-      device->proactor_pool, 0, &device->proactor
-    );
-    // FIXME: here we can leak device...
-    IREE_RETURN_IF_ERROR(status);
-  }
-
-  iree_hal_strela_allocator_t *allocator = NULL;
-  // TODO: implement iree_hal_strela_allocator_create
-  {
-    // FIXME: here we can leak device...
-    IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, sizeof *allocator, (void **)&allocator)
-    );
-    iree_hal_resource_initialize(&iree_hal_strela_allocator_vtable, &allocator->resource);
-
-    allocator->host_allocator = host_allocator;
-  }
-
-  device->device_allocator = (iree_hal_allocator_t *)allocator;
-
-  *out_device = (iree_hal_device_t*)device;
-  return iree_ok_status();
+  return iree_hal_strela_device_create(
+    driver->identifier, &options, device_create_params, host_allocator, out_device
+  );
 }
 
 static iree_status_t
@@ -213,8 +181,8 @@ iree_hal_strela_driver_create_device_by_path(
 
   // Fall back to creating by ID (ID 0)
   return iree_hal_strela_driver_create_device_by_id(
-   base_driver, 0, param_count, params,
-   NULL, host_allocator, out_device
+    base_driver, 0, param_count, params,
+    device_create_params, host_allocator, out_device
   );
 }
 

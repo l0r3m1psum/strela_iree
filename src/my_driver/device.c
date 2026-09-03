@@ -1,18 +1,106 @@
+#include "iree/async/util/proactor_pool.h"
+
+typedef struct iree_hal_strela_device_options_t {
+  int reserved;
+} iree_hal_strela_device_options_t;
+
+static void
+iree_hal_strela_device_options_initialize(
+  iree_hal_strela_device_options_t *out_options
+) {
+  memset(out_options, 0, sizeof *out_options);
+}
+
+static iree_status_t
+iree_hal_strela_device_options_verify(
+  const iree_hal_strela_device_options_t *options
+) {
+  iree_status_t status = iree_ok_status();
+
+  if (!is_all_zero(options, sizeof *options)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  }
+
+  return status;
+}
+
 typedef struct {
   iree_hal_resource_t resource;
   iree_string_view_t identifier;
   iree_allocator_t host_allocator;
   iree_hal_allocator_t *device_allocator;
   iree_async_proactor_pool_t *proactor_pool;
-  iree_async_proactor_t* proactor;
+  iree_async_proactor_t *proactor;
   iree_async_frontier_tracker_t *frontier_tracker;
   iree_async_axis_t axis;
   iree_atomic_int64_t epoch;
   iree_hal_channel_provider_t *channel_provider;
   iree_hal_device_topology_info_t topology_info;
 
-  strela_dev *dev;
+  strela_dev *dev; // TODO: does this goes here?
+
+  // + trailing identifier string storage
 } iree_hal_strela_device_t;
+
+static const iree_hal_device_vtable_t iree_hal_strela_device_vtable;
+
+static iree_hal_strela_device_t *
+iree_hal_strela_device_cast(iree_hal_device_t* base_value) {
+  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_device_vtable);
+  return (iree_hal_strela_device_t *)base_value;
+}
+
+static iree_status_t
+iree_hal_strela_device_create(
+  iree_string_view_t identifier,
+  const iree_hal_strela_device_options_t *options,
+  const iree_hal_device_create_params_t *create_params,
+  iree_allocator_t host_allocator,
+  iree_hal_device_t **out_device
+) {
+  iree_status_t status = iree_ok_status();
+
+  status = iree_hal_strela_device_options_verify(options);
+
+  iree_hal_strela_device_t *device = NULL;
+  iree_host_size_t total_size = sizeof *device + identifier.size;
+
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, total_size, (void**)&device);
+  }
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_resource_initialize(&iree_hal_strela_device_vtable, &device->resource);
+    iree_string_view_append_to_buffer(
+      identifier, &device->identifier,
+      (char*)device + total_size - identifier.size
+    );
+    device->host_allocator = host_allocator;
+    device->proactor_pool = create_params->proactor_pool;
+    iree_async_proactor_pool_retain(device->proactor_pool);
+    iree_atomic_store(&device->epoch, 0, iree_memory_order_relaxed);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_async_proactor_pool_get(
+      device->proactor_pool, 0, &device->proactor
+    );
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_strela_allocator_create(
+      host_allocator, &device->device_allocator
+    );
+  }
+
+  if (!iree_status_is_ok(status) && device) {
+    iree_hal_device_release((iree_hal_device_t*)device);
+  }
+
+  *out_device = (iree_hal_device_t*)device;
+
+  return status;
+}
 
 static iree_status_t
 iree_hal_strela_device_create_command_buffer(
@@ -214,11 +302,11 @@ iree_hal_strela_device_create_executable_cache(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_executable_cache = NULL;
   iree_allocator_t host_allocator = iree_hal_device_host_allocator(base_device);
-  iree_hal_null_executable_cache_t *executable_cache = NULL;
+  iree_hal_strela_executable_cache_t *executable_cache = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(host_allocator, sizeof(*executable_cache),
                                 (void**)&executable_cache));
-  iree_hal_resource_initialize(&iree_hal_null_executable_cache_vtable,
+  iree_hal_resource_initialize(&iree_hal_strela_executable_cache_vtable,
                                &executable_cache->resource);
   executable_cache->host_allocator = host_allocator;
 

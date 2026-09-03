@@ -1,7 +1,7 @@
-typedef struct iree_hal_null_executable_cache_t {
+typedef struct iree_hal_strela_executable_cache_t {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
-} iree_hal_null_executable_cache_t;
+} iree_hal_strela_executable_cache_t;
 
 static void
 iree_hal_strela_executable_cache_destroy(iree_hal_executable_cache_t *executable_cache) {
@@ -57,7 +57,7 @@ iree_hal_strela_executable_cache_prepare_executable(
 }
 
 static const iree_hal_executable_cache_vtable_t
-iree_hal_null_executable_cache_vtable = {
+iree_hal_strela_executable_cache_vtable = {
   .destroy = iree_hal_strela_executable_cache_destroy,
   .infer_format = iree_hal_strela_executable_cache_infer_format,
   .can_prepare_format = iree_hal_strela_executable_cache_can_prepare_format,

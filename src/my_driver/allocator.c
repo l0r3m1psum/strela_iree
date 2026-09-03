@@ -1,8 +1,46 @@
 typedef struct {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
-  strela_dev *dev;
+
+  strela_dev *dev; // TODO: does this goes here?
 } iree_hal_strela_allocator_t;
+
+static const iree_hal_allocator_vtable_t iree_hal_strela_allocator_vtable;
+
+static iree_hal_strela_allocator_t *
+iree_hal_strela_allocator_cast(iree_hal_allocator_t* base_value) {
+  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_allocator_vtable);
+  return (iree_hal_strela_allocator_t *)base_value;
+}
+
+static iree_status_t
+iree_hal_strela_allocator_create(
+  iree_allocator_t host_allocator,
+  iree_hal_allocator_t **out_allocator
+) {
+  iree_status_t status = iree_ok_status();
+
+  iree_hal_strela_allocator_t* allocator = NULL;
+
+  status = iree_allocator_malloc(
+    host_allocator, sizeof *allocator, (void **)&allocator
+  );
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_resource_initialize(
+      &iree_hal_strela_allocator_vtable, &allocator->resource
+    );
+    allocator->host_allocator = host_allocator;
+  }
+
+  if (!iree_status_is_ok(status) && allocator) {
+    iree_hal_allocator_release((iree_hal_allocator_t *)allocator);
+  }
+
+  *out_allocator = (iree_hal_allocator_t *)allocator;
+
+  return status;
+}
 
 static iree_status_t
 iree_hal_strela_allocator_allocate_buffer(

@@ -8,10 +8,10 @@ iree_hal_strela_driver_factory_enumerate(
 
   static const iree_hal_driver_info_t driver_info = {
     .driver_name = IREE_SVL("strela"),
-    .full_name = IREE_SVL("STRELA FPGA SoC Accelerator"),
+    .full_name = IREE_SVL("STRELA Accelerator"),
   };
   *out_driver_info_count = 1;
-  *out_driver_infos = (iree_hal_driver_info_t *)&driver_info;
+  *out_driver_infos = &driver_info;
   return iree_ok_status();
 }
 
