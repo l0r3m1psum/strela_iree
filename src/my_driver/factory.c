@@ -7,8 +7,8 @@ strela_driver_factory_enumerate(
   printf("%s\n", __func__);
 
   static const iree_hal_driver_info_t driver_info = {
-    .driver_name = iree_string_view_literal("strela"),
-    .full_name = iree_string_view_literal("STRELA FPGA SoC Accelerator"),
+    .driver_name = IREE_SVL("strela"),
+    .full_name = IREE_SVL("STRELA FPGA SoC Accelerator"),
   };
   *out_driver_info_count = 1;
   *out_driver_infos = (iree_hal_driver_info_t *)&driver_info;
@@ -24,28 +24,37 @@ strela_driver_factory_try_create(
 ) {
   printf("%s\n", __func__);
 
-  iree_string_view_t strela_name = iree_string_view_literal("strela");
+  iree_string_view_t strela_name = IREE_SVL("strela");
   if (!iree_string_view_equal(driver_name, strela_name)) {
     return iree_make_status(
-      IREE_STATUS_UNAVAILABLE, "no driver '%.*s' found",
+      IREE_STATUS_UNAVAILABLE,
+      "no driver '%.*s' is provided by this factory",
       (int)driver_name.size, driver_name.data
     );
   }
 
-  strela_driver_t *driver = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *driver, (void **)&driver));
-  memset(driver, 0, sizeof *driver);
-  iree_hal_resource_initialize(&strela_driver_vtable, &driver->resource);
-  driver->host_allocator = host_allocator;
-  driver->identifier = strela_name;
+  {
+    strela_driver_t *driver = NULL;
+    iree_host_size_t total_size = sizeof *driver + driver_name.size;
+    IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, total_size, (void **)&driver)
+    );
+    iree_hal_resource_initialize(&strela_driver_vtable, &driver->resource);
+    driver->host_allocator = host_allocator;
+    iree_string_view_append_to_buffer(
+      driver_name, &driver->identifier,
+      (char *)driver + total_size - driver_name.size
+    );
 
-  *out_driver = (iree_hal_driver_t *)driver;
+    *out_driver = (iree_hal_driver_t *)driver;
+  }
+
   return iree_ok_status();
 }
 
 static const iree_hal_driver_factory_t
 factory = {
-    .self = NULL,
-    .enumerate = strela_driver_factory_enumerate,
-    .try_create = strela_driver_factory_try_create,
+  .self = NULL,
+  .enumerate = strela_driver_factory_enumerate,
+  .try_create = strela_driver_factory_try_create,
 };
