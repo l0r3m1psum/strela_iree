@@ -1,65 +1,87 @@
-typedef struct iree_hal_iree_hal_strela_device_options_t {
+#include "iree/async/util/proactor_pool.h"
+
+typedef struct iree_hal_strela_driver_options_t {
   int reserved;
-} iree_hal_iree_hal_strela_device_options_t;
+} iree_hal_strela_driver_options_t;
+
+static void
+iree_hal_strela_driver_options_initialize(
+  iree_hal_strela_driver_options_t *out_options
+) {
+  memset(out_options, 0, sizeof *out_options);
+}
+
+static iree_status_t
+iree_hal_strela_driver_options_verify(
+  const iree_hal_strela_driver_options_t *options
+) {
+  iree_status_t status = iree_ok_status();
+
+  if (!is_all_zero(options, sizeof *options)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
+  }
+
+  return status;
+}
 
 typedef struct {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
 
   iree_string_view_t identifier;
-  iree_hal_iree_hal_strela_device_options_t options;
+  iree_hal_strela_driver_options_t options;
 
-  // add stuff here
+  // + trailing identifier string storage
 } iree_hal_strela_driver_t;
 
+static const iree_hal_driver_vtable_t iree_hal_strela_driver_vtable;
+
+static iree_hal_strela_driver_t *
+iree_hal_strela_driver_cast(iree_hal_driver_t* base_value) {
+  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_driver_vtable);
+  return (iree_hal_strela_driver_t *)base_value;
+}
+
 static iree_status_t
-iree_hal_strela_driver_create_device_by_id(
-  iree_hal_driver_t *base_driver,
-  iree_hal_device_id_t device_id,
-  iree_host_size_t param_count,
-  const iree_string_pair_t *params,
-  const iree_hal_device_create_params_t *device_create_params,
+iree_hal_strela_driver_create(
+  iree_string_view_t identifier,
+  const iree_hal_strela_driver_options_t *options,
   iree_allocator_t host_allocator,
-  iree_hal_device_t **out_device
+  iree_hal_driver_t **out_driver
 ) {
-  printf("%s\n", __func__);
+  iree_status_t status = iree_ok_status();
 
-  [[maybe_unused]] iree_hal_strela_driver_t* driver = (iree_hal_strela_driver_t*)base_driver;
+  status = iree_hal_strela_driver_options_verify(options);
 
-  // 1. Allocate your custom iree_hal_strela_device_t
-  iree_hal_strela_device_t* device = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *device, (void **)&device));
-  memset(device, 0, sizeof *device);
+  iree_hal_strela_driver_t *driver = NULL;
+  iree_host_size_t total_size = sizeof *driver + identifier.size;
 
-  // 2. Initialize the basics
-  iree_hal_resource_initialize(&iree_hal_strela_device_vtable, &device->resource);
-  iree_string_view_t identifier = iree_string_view_literal("strela-fpga-0");
-  device->host_allocator = host_allocator;
-  device->identifier = identifier;
-
-  {
-    iree_hal_strela_allocator_t *allocator = NULL;
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *allocator, (void**)&allocator));
-    memset(allocator, 0, sizeof *allocator);
-
-    iree_hal_resource_initialize(&iree_hal_strela_allocator_vtable, &allocator->resource);
-
-    allocator->dev = device->dev;
-    allocator->host_allocator = host_allocator;
-
-    device->device_allocator = (iree_hal_allocator_t *)allocator;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, total_size, (void **)&driver);
   }
 
-  *out_device = (iree_hal_device_t*)device;
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    iree_hal_resource_initialize(&iree_hal_strela_driver_vtable, &driver->resource);
+    driver->host_allocator = host_allocator;
+    iree_string_view_append_to_buffer(
+      identifier, &driver->identifier,
+      (char *)driver + total_size - identifier.size
+    );
+
+    memcpy(&driver->options, options, sizeof *options);
+
+    *out_driver = (iree_hal_driver_t *)driver;
+  }
+
+  return status;
 }
 
 static void
 iree_hal_strela_driver_destroy(iree_hal_driver_t *base_driver) {
-  iree_hal_strela_driver_t *driver = (iree_hal_strela_driver_t *)base_driver;
+  iree_hal_strela_driver_t *driver = iree_hal_strela_driver_cast(base_driver);
   iree_allocator_t host_allocator = driver->host_allocator;
 
-  // Perform any additional driver teardown here if necessary
+  // NOTE: if the driver loaded any libraries they should be closed here.
 
   iree_allocator_free(host_allocator, driver);
 }
@@ -73,30 +95,101 @@ iree_hal_strela_driver_query_available_devices(
 ) {
   printf("%s\n", __func__);
 
-  // We only have 1 FPGA device to expose
-  *out_device_info_count = 1;
+  iree_status_t res = iree_ok_status();
 
-  iree_hal_device_info_t* device_infos = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *device_infos * 1, (void**)&device_infos));
+  unsigned count = 0;
+  if (strela_device_count(&count) == -1) {
+    res = iree_status_from_code(IREE_STATUS_NOT_FOUND);
+  }
 
-  iree_string_view_t name = iree_string_view_literal("strela-fpga-0");
-  // Populate the dummy device info
-  device_infos[0].device_id = 0; // Just use ID 0 for the first device
-  device_infos[0].name = name;
+  if (iree_status_is_ok(res)) {
+    // TODO: is count != 0 we should return all the available devices.
+    static const iree_hal_device_info_t device_infos[1] = {
+      {
+        .device_id = 0,
+        .name = iree_string_view_literal("default_strela"),
+      },
+    };
+    res = iree_allocator_clone(
+      host_allocator,
+      iree_make_const_byte_span(device_infos, sizeof device_infos),
+      (void **)out_device_infos
+    );
+    *out_device_info_count = IREE_ARRAYSIZE(device_infos);
+  }
 
-  *out_device_infos = device_infos;
-  return iree_ok_status();
+  return res;
 }
 
 static iree_status_t
 iree_hal_strela_driver_dump_device_info(
   iree_hal_driver_t *base_driver,
   iree_hal_device_id_t device_id,
-  iree_string_builder_t* builder
+  iree_string_builder_t *builder
+) {
+  printf("%s\n", __func__);
+  iree_hal_strela_driver_t *driver = iree_hal_strela_driver_cast(base_driver);
+
+  (void)driver;
+
+  return iree_string_builder_append_cstring(builder, "STRELA Custom FPGA Accelerator\n");
+}
+
+static iree_status_t
+iree_hal_strela_driver_create_device_by_id(
+  iree_hal_driver_t *base_driver,
+  iree_hal_device_id_t device_id,
+  iree_host_size_t param_count,
+  const iree_string_pair_t *params,
+  const iree_hal_device_create_params_t *device_create_params,
+  iree_allocator_t host_allocator,
+  iree_hal_device_t **out_device
 ) {
   printf("%s\n", __func__);
 
-  return iree_string_builder_append_cstring(builder, "STRELA Custom FPGA Accelerator\n");
+  iree_hal_strela_driver_t* driver = iree_hal_strela_driver_cast(base_driver);
+
+  (void)driver;
+
+  iree_hal_strela_device_t *device = NULL;
+  // TODO: implement iree_hal_strela_device_create
+  {
+    iree_host_size_t total_size = sizeof(*device) + driver->identifier.size;
+    IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, total_size, (void**)&device)
+    );
+    iree_hal_resource_initialize(&iree_hal_strela_device_vtable, &device->resource);
+    iree_string_view_append_to_buffer(
+      driver->identifier, &device->identifier,
+      (char*)device + total_size - driver->identifier.size
+    );
+    device->host_allocator = host_allocator;
+    device->proactor_pool = device_create_params->proactor_pool;
+    iree_async_proactor_pool_retain(device->proactor_pool);
+    iree_atomic_store(&device->epoch, 0, iree_memory_order_relaxed);
+    iree_status_t status = iree_async_proactor_pool_get(
+      device->proactor_pool, 0, &device->proactor
+    );
+    // FIXME: here we can leak device...
+    IREE_RETURN_IF_ERROR(status);
+  }
+
+  iree_hal_strela_allocator_t *allocator = NULL;
+  // TODO: implement iree_hal_strela_allocator_create
+  {
+    // FIXME: here we can leak device...
+    IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, sizeof *allocator, (void **)&allocator)
+    );
+    iree_hal_resource_initialize(&iree_hal_strela_allocator_vtable, &allocator->resource);
+
+    allocator->host_allocator = host_allocator;
+  }
+
+  device->device_allocator = (iree_hal_allocator_t *)allocator;
+
+  *out_device = (iree_hal_device_t*)device;
+  return iree_ok_status();
 }
 
 static iree_status_t

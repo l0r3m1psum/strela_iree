@@ -1,6 +1,16 @@
 #include "strela.h"
 #include "iree/hal/api.h"
 
+static bool
+is_all_zero(const void *ptr, size_t size) {
+  const unsigned char *buf = (const unsigned char *)ptr;
+
+  if (size == 0) return true;
+
+  // checks if every byte matches its preceding byte
+  return buf[0] == 0 && memcmp(buf, buf + 1, size - 1) == 0;
+}
+
 #include "buffer.c"
 #include "allocator.c"
 #include "command_buffer.c"

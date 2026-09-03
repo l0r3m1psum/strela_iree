@@ -23,33 +23,26 @@ iree_hal_strela_driver_factory_try_create(
   iree_hal_driver_t **out_driver
 ) {
   printf("%s\n", __func__);
+  iree_status_t status = iree_ok_status();
 
-  iree_string_view_t iree_hal_strela_name = IREE_SVL("strela");
-  if (!iree_string_view_equal(driver_name, iree_hal_strela_name)) {
-    return iree_make_status(
+  if (!iree_string_view_equal(driver_name, IREE_SV("strela"))) {
+    status = iree_make_status(
       IREE_STATUS_UNAVAILABLE,
       "no driver '%.*s' is provided by this factory",
       (int)driver_name.size, driver_name.data
     );
   }
 
-  {
-    iree_hal_strela_driver_t *driver = NULL;
-    iree_host_size_t total_size = sizeof *driver + driver_name.size;
-    IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total_size, (void **)&driver)
-    );
-    iree_hal_resource_initialize(&iree_hal_strela_driver_vtable, &driver->resource);
-    driver->host_allocator = host_allocator;
-    iree_string_view_append_to_buffer(
-      driver_name, &driver->identifier,
-      (char *)driver + total_size - driver_name.size
-    );
+  iree_hal_strela_driver_options_t options;
+  iree_hal_strela_driver_options_initialize(&options);
 
-    *out_driver = (iree_hal_driver_t *)driver;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_strela_driver_create(
+      driver_name, &options, host_allocator, out_driver
+    );
   }
 
-  return iree_ok_status();
+  return status;
 }
 
 static const iree_hal_driver_factory_t
