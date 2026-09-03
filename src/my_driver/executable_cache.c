@@ -4,12 +4,12 @@ typedef struct iree_hal_null_executable_cache_t {
 } iree_hal_null_executable_cache_t;
 
 static void
-strela_executable_cache_destroy(iree_hal_executable_cache_t *executable_cache) {
+iree_hal_strela_executable_cache_destroy(iree_hal_executable_cache_t *executable_cache) {
   ;
 }
 
 static iree_status_t
-strela_executable_cache_infer_format(
+iree_hal_strela_executable_cache_infer_format(
   iree_hal_executable_cache_t *executable_cache,
   iree_hal_executable_caching_mode_t caching_mode,
   iree_const_byte_span_t executable_data,
@@ -21,7 +21,7 @@ strela_executable_cache_infer_format(
 }
 
 static bool
-strela_executable_cache_can_prepare_format(
+iree_hal_strela_executable_cache_can_prepare_format(
   iree_hal_executable_cache_t *executable_cache,
   iree_hal_executable_caching_mode_t caching_mode,
   iree_string_view_t executable_format
@@ -32,7 +32,7 @@ strela_executable_cache_can_prepare_format(
 }
 
 static iree_status_t
-strela_executable_cache_prepare_executable(
+iree_hal_strela_executable_cache_prepare_executable(
   iree_hal_executable_cache_t *executable_cache,
   const iree_hal_executable_params_t *executable_params,
   iree_hal_executable_t **out_executable
@@ -43,11 +43,11 @@ strela_executable_cache_prepare_executable(
   // you can safely fall back to the system allocator for this stub.
   iree_allocator_t host_allocator = iree_allocator_system();
 
-  strela_executable_t* executable = NULL;
+  iree_hal_strela_executable_t* executable = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *executable, (void**)&executable));
 
   // Initialize the base resource using your new vtable
-  iree_hal_resource_initialize(&strela_executable_vtable, &executable->resource);
+  iree_hal_resource_initialize(&iree_hal_strela_executable_vtable, &executable->resource);
   executable->host_allocator = host_allocator;
 
   // Pass the allocated and initialized executable back to IREE
@@ -58,8 +58,8 @@ strela_executable_cache_prepare_executable(
 
 static const iree_hal_executable_cache_vtable_t
 iree_hal_null_executable_cache_vtable = {
-  .destroy = strela_executable_cache_destroy,
-  .infer_format = strela_executable_cache_infer_format,
-  .can_prepare_format = strela_executable_cache_can_prepare_format,
-  .prepare_executable = strela_executable_cache_prepare_executable,
+  .destroy = iree_hal_strela_executable_cache_destroy,
+  .infer_format = iree_hal_strela_executable_cache_infer_format,
+  .can_prepare_format = iree_hal_strela_executable_cache_can_prepare_format,
+  .prepare_executable = iree_hal_strela_executable_cache_prepare_executable,
 };

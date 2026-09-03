@@ -12,10 +12,10 @@ typedef struct {
   iree_hal_device_topology_info_t topology_info;
 
   strela_dev *dev;
-} strela_device_t;
+} iree_hal_strela_device_t;
 
 static iree_status_t
-strela_device_create_command_buffer(
+iree_hal_strela_device_create_command_buffer(
   iree_hal_device_t *base_device,
   iree_hal_command_buffer_mode_t mode,
   iree_hal_command_category_t command_categories,
@@ -27,7 +27,7 @@ strela_device_create_command_buffer(
 
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_command_buffer = NULL;
-  strela_command_buffer_t* command_buffer = NULL;
+  iree_hal_strela_command_buffer_t* command_buffer = NULL;
   iree_hal_allocator_t *device_allocator = iree_hal_device_allocator(base_device);
   iree_allocator_t host_allocator = iree_hal_device_host_allocator(base_device);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -40,7 +40,7 @@ strela_device_create_command_buffer(
   iree_hal_command_buffer_initialize(
       device_allocator, mode, command_categories, queue_affinity,
       binding_capacity, (uint8_t*)command_buffer + sizeof *command_buffer,
-      &strela_command_buffer_vtable, &command_buffer->base);
+      &iree_hal_strela_command_buffer_vtable, &command_buffer->base);
   command_buffer->host_allocator = host_allocator;
 
   iree_status_t status = iree_ok_status();
@@ -55,8 +55,8 @@ strela_device_create_command_buffer(
 }
 
 static void
-strela_device_destroy(iree_hal_device_t *base_device) {
-  strela_device_t *device = (strela_device_t *)base_device;
+iree_hal_strela_device_destroy(iree_hal_device_t *base_device) {
+  iree_hal_strela_device_t *device = (iree_hal_strela_device_t *)base_device;
   iree_allocator_t host_allocator = device->host_allocator;
 
   // 1. Release the custom allocator (this decrements the refcount)
@@ -66,7 +66,7 @@ strela_device_destroy(iree_hal_device_t *base_device) {
 
   // 2. Teardown the hardware handle
   if (device->dev) {
-    // strela_dev_destroy(device->dev); // Replace with your actual hardware free function
+    // iree_hal_strela_dev_destroy(device->dev); // Replace with your actual hardware free function
   }
 
   // 3. Free the device memory
@@ -74,7 +74,7 @@ strela_device_destroy(iree_hal_device_t *base_device) {
 }
 
 static iree_status_t
-strela_device_queue_execute(
+iree_hal_strela_device_queue_execute(
   iree_hal_device_t *base_device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -85,19 +85,19 @@ strela_device_queue_execute(
 ) {
   printf("%s\n", __func__);
 
-  [[maybe_unused]] strela_device_t *device = (strela_device_t *)base_device;
+  [[maybe_unused]] iree_hal_strela_device_t *device = (iree_hal_strela_device_t *)base_device;
 
   // 1. Wait on the provided wait_semaphore_list.
   // 2. Iterate over the recorded command_buffers.
 
   // For each recorded task, apply the configuration to the hardware.
-  // strela_config(device->dev, kernel, &recorded_conf);
+  // iree_hal_strela_config(device->dev, kernel, &recorded_conf);
 
   // Trigger the accelerator execution.
-  // strela_execute(device->dev);
+  // iree_hal_strela_execute(device->dev);
 
   // Verify that the accelerator hasn't encountered a hardware fault.
-  // if (!strela_dev_ok(device->dev)) {
+  // if (!iree_hal_strela_dev_ok(device->dev)) {
   //     return iree_make_status(IREE_STATUS_INTERNAL, "STRELA execution failed");
   // }
 
@@ -109,23 +109,23 @@ strela_device_queue_execute(
 }
 
 static iree_hal_allocator_t *
-strela_device_allocator(iree_hal_device_t *base_device) {
-  strela_device_t* device = (strela_device_t*)base_device;
+iree_hal_strela_device_allocator(iree_hal_device_t *base_device) {
+  iree_hal_strela_device_t* device = (iree_hal_strela_device_t*)base_device;
   return device->device_allocator;
 }
 
 static iree_string_view_t
-strela_device_id(iree_hal_device_t *base_device) {
-  return ((strela_device_t *)base_device)->identifier;
+iree_hal_strela_device_id(iree_hal_device_t *base_device) {
+  return ((iree_hal_strela_device_t *)base_device)->identifier;
 }
 
 static iree_allocator_t
-strela_device_host_allocator(iree_hal_device_t *base_device) {
-  return ((strela_device_t *)base_device)->host_allocator;
+iree_hal_strela_device_host_allocator(iree_hal_device_t *base_device) {
+  return ((iree_hal_strela_device_t *)base_device)->host_allocator;
 }
 
 static iree_status_t
-strela_device_query_i64(
+iree_hal_strela_device_query_i64(
   iree_hal_device_t *base_device,
   iree_string_view_t category,
   iree_string_view_t key,
@@ -164,7 +164,7 @@ strela_device_query_i64(
 }
 
 static iree_status_t
-strela_device_create_semaphore(
+iree_hal_strela_device_create_semaphore(
   iree_hal_device_t *base_device,
   iree_hal_queue_affinity_t queue_affinity,
   uint64_t initial_value,
@@ -172,13 +172,13 @@ strela_device_create_semaphore(
   iree_hal_semaphore_t **out_semaphore
 ) {
   printf("%s\n", __func__);
-  strela_device_t *device = (strela_device_t *) base_device;
+  iree_hal_strela_device_t *device = (iree_hal_strela_device_t *) base_device;
 
   IREE_ASSERT_ARGUMENT(out_semaphore);
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_semaphore = NULL;
 
-  strela_semaphore_t *semaphore = NULL;
+  iree_hal_strela_semaphore_t *semaphore = NULL;
   iree_host_size_t frontier_offset = 0, total_size = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
     z0,
@@ -189,7 +189,7 @@ strela_device_create_semaphore(
     iree_allocator_malloc(device->host_allocator, total_size, (void**)&semaphore)
   );
   iree_async_semaphore_initialize(
-    (const iree_async_semaphore_vtable_t *) &strela_semaphore_vtable,
+    (const iree_async_semaphore_vtable_t *) &iree_hal_strela_semaphore_vtable,
     device->proactor, initial_value, frontier_offset, 0, &semaphore->async
   );
   semaphore->host_allocator = device->host_allocator;
@@ -206,7 +206,7 @@ strela_device_create_semaphore(
 }
 
 static iree_status_t
-strela_device_create_executable_cache(
+iree_hal_strela_device_create_executable_cache(
   iree_hal_device_t *base_device,
   iree_string_view_t identifier,
   iree_hal_executable_cache_t **out_executable_cache
@@ -236,12 +236,12 @@ strela_device_create_executable_cache(
 }
 
 static iree_status_t
-strela_device_trim(iree_hal_device_t *device) {
+iree_hal_strela_device_trim(iree_hal_device_t *device) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
-strela_device_query_capabilities(
+iree_hal_strela_device_query_capabilities(
   iree_hal_device_t *device,
   iree_hal_device_capabilities_t *out_capabilities
 ) {
@@ -250,7 +250,7 @@ strela_device_query_capabilities(
 }
 
 static iree_status_t
-strela_device_refine_topology_edge(
+iree_hal_strela_device_refine_topology_edge(
   iree_hal_device_t *src_device,
   iree_hal_device_t *dst_device,
   iree_hal_topology_edge_t *edge
@@ -259,7 +259,7 @@ strela_device_refine_topology_edge(
 }
 
 static iree_status_t
-strela_device_assign_topology_info(
+iree_hal_strela_device_assign_topology_info(
   iree_hal_device_t *device,
   const iree_hal_device_topology_info_t *topology_info
 ) {
@@ -267,7 +267,7 @@ strela_device_assign_topology_info(
 }
 
 static iree_status_t
-strela_device_create_channel(
+iree_hal_strela_device_create_channel(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   iree_hal_channel_params_t params,
@@ -277,7 +277,7 @@ strela_device_create_channel(
 }
 
 static iree_status_t
-strela_device_create_event(
+iree_hal_strela_device_create_event(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   iree_hal_event_flags_t flags,
@@ -287,7 +287,7 @@ strela_device_create_event(
 }
 
 static iree_status_t
-strela_device_import_file(
+iree_hal_strela_device_import_file(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   iree_hal_memory_access_t access,
@@ -299,7 +299,7 @@ strela_device_import_file(
 }
 
 static iree_status_t
-strela_device_query_queue_pool_backend(
+iree_hal_strela_device_query_queue_pool_backend(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   iree_hal_queue_pool_backend_t *out_backend
@@ -308,7 +308,7 @@ strela_device_query_queue_pool_backend(
 }
 
 static iree_status_t
-strela_device_queue_alloca(
+iree_hal_strela_device_queue_alloca(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -319,8 +319,8 @@ strela_device_queue_alloca(
   iree_hal_alloca_flags_t flags,
   iree_hal_buffer_t **IREE_RESTRICT out_buffer
 ) {
-  return strela_allocator_allocate_buffer(
-    ((strela_device_t *) device)->device_allocator,
+  return iree_hal_strela_allocator_allocate_buffer(
+    ((iree_hal_strela_device_t *) device)->device_allocator,
     &params,
     allocation_size,
     out_buffer
@@ -328,7 +328,7 @@ strela_device_queue_alloca(
 }
 
 static iree_status_t
-strela_device_queue_dealloca(
+iree_hal_strela_device_queue_dealloca(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -340,7 +340,7 @@ strela_device_queue_dealloca(
 }
 
 static iree_status_t
-strela_device_queue_fill(
+iree_hal_strela_device_queue_fill(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -356,7 +356,7 @@ strela_device_queue_fill(
 }
 
 static iree_status_t
-strela_device_queue_update(
+iree_hal_strela_device_queue_update(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -372,7 +372,7 @@ strela_device_queue_update(
 }
 
 static iree_status_t
-strela_device_queue_copy(
+iree_hal_strela_device_queue_copy(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -388,7 +388,7 @@ strela_device_queue_copy(
 }
 
 static iree_status_t
-strela_device_queue_read(
+iree_hal_strela_device_queue_read(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -404,7 +404,7 @@ strela_device_queue_read(
 }
 
 static iree_status_t
-strela_device_queue_write(
+iree_hal_strela_device_queue_write(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -420,7 +420,7 @@ strela_device_queue_write(
 }
 
 static iree_status_t
-strela_device_queue_host_call(
+iree_hal_strela_device_queue_host_call(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -433,7 +433,7 @@ strela_device_queue_host_call(
 }
 
 static iree_status_t
-strela_device_queue_dispatch(
+iree_hal_strela_device_queue_dispatch(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity,
   const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -449,7 +449,7 @@ strela_device_queue_dispatch(
 }
 
 static iree_status_t
-strela_device_queue_flush(
+iree_hal_strela_device_queue_flush(
   iree_hal_device_t *device,
   iree_hal_queue_affinity_t queue_affinity
 ) {
@@ -457,7 +457,7 @@ strela_device_queue_flush(
 }
 
 static iree_status_t
-strela_device_profiling_begin(
+iree_hal_strela_device_profiling_begin(
   iree_hal_device_t *device,
   const iree_hal_device_profiling_options_t *options
 ) {
@@ -465,17 +465,17 @@ strela_device_profiling_begin(
 }
 
 static iree_status_t
-strela_device_profiling_flush(iree_hal_device_t *device) {
+iree_hal_strela_device_profiling_flush(iree_hal_device_t *device) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
-strela_device_profiling_end(iree_hal_device_t *device) {
+iree_hal_strela_device_profiling_end(iree_hal_device_t *device) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
-strela_device_external_capture_begin(
+iree_hal_strela_device_external_capture_begin(
   iree_hal_device_t *device,
   const iree_hal_device_external_capture_options_t *options
 ) {
@@ -483,16 +483,16 @@ strela_device_external_capture_begin(
 }
 
 static iree_status_t
-strela_device_external_capture_end(iree_hal_device_t *device) {
+iree_hal_strela_device_external_capture_end(iree_hal_device_t *device) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static void
-strela_device_replace_device_allocator(
+iree_hal_strela_device_replace_device_allocator(
   iree_hal_device_t *base_device,
   iree_hal_allocator_t *new_allocator
 ) {
-  strela_device_t* device = (strela_device_t*)base_device;
+  iree_hal_strela_device_t* device = (iree_hal_strela_device_t*)base_device;
 
   iree_hal_allocator_retain(new_allocator);
 
@@ -504,7 +504,7 @@ strela_device_replace_device_allocator(
 }
 
 static void
-strela_device_replace_channel_provider(
+iree_hal_strela_device_replace_channel_provider(
   iree_hal_device_t *base_device,
   iree_hal_channel_provider_t *new_provider
 ) {
@@ -514,41 +514,41 @@ strela_device_replace_channel_provider(
 }
 
 static const iree_hal_device_vtable_t
-strela_device_vtable = {
-  .destroy                  = strela_device_destroy,
-  .id                       = strela_device_id,
-  .host_allocator           = strela_device_host_allocator,
-  .device_allocator         = strela_device_allocator,
-  .replace_device_allocator = strela_device_replace_device_allocator,
-  .replace_channel_provider = strela_device_replace_channel_provider,
-  .trim                     = strela_device_trim,
-  .query_i64                = strela_device_query_i64,
-  .query_capabilities       = strela_device_query_capabilities,
+iree_hal_strela_device_vtable = {
+  .destroy                  = iree_hal_strela_device_destroy,
+  .id                       = iree_hal_strela_device_id,
+  .host_allocator           = iree_hal_strela_device_host_allocator,
+  .device_allocator         = iree_hal_strela_device_allocator,
+  .replace_device_allocator = iree_hal_strela_device_replace_device_allocator,
+  .replace_channel_provider = iree_hal_strela_device_replace_channel_provider,
+  .trim                     = iree_hal_strela_device_trim,
+  .query_i64                = iree_hal_strela_device_query_i64,
+  .query_capabilities       = iree_hal_strela_device_query_capabilities,
   // const iree_hal_device_topology_info_t*(IREE_API_PTR* topology_info)(iree_hal_device_t* device);
-  .refine_topology_edge     = strela_device_refine_topology_edge,
-  .assign_topology_info     = strela_device_assign_topology_info,
-  .create_channel           = strela_device_create_channel,
-  .create_command_buffer    = strela_device_create_command_buffer,
-  .create_event             = strela_device_create_event,
-  .create_executable_cache  = strela_device_create_executable_cache,
-  .import_file              = strela_device_import_file,
-  .create_semaphore         = strela_device_create_semaphore,
+  .refine_topology_edge     = iree_hal_strela_device_refine_topology_edge,
+  .assign_topology_info     = iree_hal_strela_device_assign_topology_info,
+  .create_channel           = iree_hal_strela_device_create_channel,
+  .create_command_buffer    = iree_hal_strela_device_create_command_buffer,
+  .create_event             = iree_hal_strela_device_create_event,
+  .create_executable_cache  = iree_hal_strela_device_create_executable_cache,
+  .import_file              = iree_hal_strela_device_import_file,
+  .create_semaphore         = iree_hal_strela_device_create_semaphore,
   // iree_hal_semaphore_compatibility_t(IREE_API_PTR* query_semaphore_compatibility)(iree_hal_device_t* device, iree_hal_semaphore_t* semaphore);
-  .query_queue_pool_backend = strela_device_query_queue_pool_backend,
-  .queue_alloca             = strela_device_queue_alloca,
-  .queue_dealloca           = strela_device_queue_dealloca,
-  .queue_fill               = strela_device_queue_fill,
-  .queue_update             = strela_device_queue_update,
-  .queue_copy               = strela_device_queue_copy,
-  .queue_read               = strela_device_queue_read,
-  .queue_write              = strela_device_queue_write,
-  .queue_host_call          = strela_device_queue_host_call,
-  .queue_dispatch           = strela_device_queue_dispatch,
-  .queue_execute            = strela_device_queue_execute,
-  .queue_flush              = strela_device_queue_flush,
-  .profiling_begin          = strela_device_profiling_begin,
-  .profiling_flush          = strela_device_profiling_flush,
-  .profiling_end            = strela_device_profiling_end,
-  .external_capture_begin   = strela_device_external_capture_begin,
-  .external_capture_end     = strela_device_external_capture_end,
+  .query_queue_pool_backend = iree_hal_strela_device_query_queue_pool_backend,
+  .queue_alloca             = iree_hal_strela_device_queue_alloca,
+  .queue_dealloca           = iree_hal_strela_device_queue_dealloca,
+  .queue_fill               = iree_hal_strela_device_queue_fill,
+  .queue_update             = iree_hal_strela_device_queue_update,
+  .queue_copy               = iree_hal_strela_device_queue_copy,
+  .queue_read               = iree_hal_strela_device_queue_read,
+  .queue_write              = iree_hal_strela_device_queue_write,
+  .queue_host_call          = iree_hal_strela_device_queue_host_call,
+  .queue_dispatch           = iree_hal_strela_device_queue_dispatch,
+  .queue_execute            = iree_hal_strela_device_queue_execute,
+  .queue_flush              = iree_hal_strela_device_queue_flush,
+  .profiling_begin          = iree_hal_strela_device_profiling_begin,
+  .profiling_flush          = iree_hal_strela_device_profiling_flush,
+  .profiling_end            = iree_hal_strela_device_profiling_end,
+  .external_capture_begin   = iree_hal_strela_device_external_capture_begin,
+  .external_capture_end     = iree_hal_strela_device_external_capture_end,
 };

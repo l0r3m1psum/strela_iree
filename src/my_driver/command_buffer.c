@@ -2,10 +2,10 @@ typedef struct {
   iree_hal_command_buffer_t base;
   iree_allocator_t host_allocator;
   // Internal ring buffer or array to store recorded STRELA commands
-} strela_command_buffer_t;
+} iree_hal_strela_command_buffer_t;
 
 static iree_status_t
-strela_command_buffer_dispatch(
+iree_hal_strela_command_buffer_dispatch(
   iree_hal_command_buffer_t *base_command_buffer,
   iree_hal_executable_t *executable,
   iree_hal_executable_function_t executable_function,
@@ -15,7 +15,7 @@ strela_command_buffer_dispatch(
   iree_hal_dispatch_flags_t dispatch_flags
 ) {
 
-  [[maybe_unused]] strela_command_buffer_t *cmd = (strela_command_buffer_t*)base_command_buffer;
+  [[maybe_unused]] iree_hal_strela_command_buffer_t *cmd = (iree_hal_strela_command_buffer_t*)base_command_buffer;
 
   // Initialize the configuration for the accelerator.
   [[maybe_unused]] strela_conf conf = {0};
@@ -32,27 +32,27 @@ strela_command_buffer_dispatch(
 }
 
 static void
-strela_command_buffer_destroy(iree_hal_command_buffer_t *base_command_buffer) {
-  [[maybe_unused]] strela_command_buffer_t *cmd = (strela_command_buffer_t *)base_command_buffer;
+iree_hal_strela_command_buffer_destroy(iree_hal_command_buffer_t *base_command_buffer) {
+  [[maybe_unused]] iree_hal_strela_command_buffer_t *cmd = (iree_hal_strela_command_buffer_t *)base_command_buffer;
 
-  // NOTE: Assuming you add `iree_allocator_t host_allocator` to strela_command_buffer_t
+  // NOTE: Assuming you add `iree_allocator_t host_allocator` to iree_hal_strela_command_buffer_t
   // iree_allocator_free(cmd->host_allocator, cmd);
 }
 
 static iree_status_t
-strela_command_buffer_begin(iree_hal_command_buffer_t *command_buffer) {
+iree_hal_strela_command_buffer_begin(iree_hal_command_buffer_t *command_buffer) {
   printf("%s\n", __func__);
   return iree_ok_status();
 }
 
 static iree_status_t
-strela_command_buffer_end(iree_hal_command_buffer_t *command_buffer) {
+iree_hal_strela_command_buffer_end(iree_hal_command_buffer_t *command_buffer) {
   printf("%s\n", __func__);
   return iree_ok_status();
 }
 
 static iree_status_t
-strela_command_buffer_begin_debug_group(
+iree_hal_strela_command_buffer_begin_debug_group(
   iree_hal_command_buffer_t *command_buffer,
   iree_string_view_t label,
   iree_hal_label_color_t label_color,
@@ -62,12 +62,12 @@ strela_command_buffer_begin_debug_group(
 }
 
 static iree_status_t
-strela_command_buffer_end_debug_group(iree_hal_command_buffer_t* command_buffer) {
+iree_hal_strela_command_buffer_end_debug_group(iree_hal_command_buffer_t* command_buffer) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
-strela_command_buffer_execution_barrier(
+iree_hal_strela_command_buffer_execution_barrier(
   iree_hal_command_buffer_t *command_buffer,
   iree_hal_execution_stage_t source_stage_mask,
   iree_hal_execution_stage_t target_stage_mask,
@@ -82,7 +82,7 @@ strela_command_buffer_execution_barrier(
 }
 
 static iree_status_t
-strela_command_buffer_signal_event(
+iree_hal_strela_command_buffer_signal_event(
   iree_hal_command_buffer_t *command_buffer,
   iree_hal_event_t *event,
   iree_hal_execution_stage_t source_stage_mask
@@ -91,7 +91,7 @@ strela_command_buffer_signal_event(
 }
 
 static iree_status_t
-strela_command_buffer_reset_event(
+iree_hal_strela_command_buffer_reset_event(
   iree_hal_command_buffer_t *command_buffer,
   iree_hal_event_t *event,
   iree_hal_execution_stage_t source_stage_mask
@@ -100,7 +100,7 @@ strela_command_buffer_reset_event(
 }
 
 static iree_status_t
-strela_command_buffer_wait_events(
+iree_hal_strela_command_buffer_wait_events(
   iree_hal_command_buffer_t *command_buffer,
   iree_host_size_t event_count,
   const iree_hal_event_t **events,
@@ -115,7 +115,7 @@ strela_command_buffer_wait_events(
 }
 
 static iree_status_t
-strela_command_buffer_advise_buffer(
+iree_hal_strela_command_buffer_advise_buffer(
   iree_hal_command_buffer_t *command_buffer,
   iree_hal_buffer_ref_t buffer_ref,
   iree_hal_memory_advise_flags_t flags,
@@ -126,7 +126,7 @@ strela_command_buffer_advise_buffer(
 }
 
 static iree_status_t
-strela_command_buffer_fill_buffer(
+iree_hal_strela_command_buffer_fill_buffer(
   iree_hal_command_buffer_t *command_buffer,
   iree_hal_buffer_ref_t target_ref,
   const void *pattern,
@@ -137,7 +137,7 @@ strela_command_buffer_fill_buffer(
 }
 
 static iree_status_t
-strela_command_buffer_update_buffer(
+iree_hal_strela_command_buffer_update_buffer(
   iree_hal_command_buffer_t *command_buffer,
   const void *source_buffer,
   iree_host_size_t source_offset,
@@ -148,7 +148,7 @@ strela_command_buffer_update_buffer(
 }
 
 static iree_status_t
-strela_command_buffer_copy_buffer(
+iree_hal_strela_command_buffer_copy_buffer(
   iree_hal_command_buffer_t *command_buffer,
   iree_hal_buffer_ref_t source_ref,
   iree_hal_buffer_ref_t target_ref,
@@ -159,7 +159,7 @@ strela_command_buffer_copy_buffer(
 }
 
 static iree_status_t
-strela_command_buffer_collective(
+iree_hal_strela_command_buffer_collective(
   iree_hal_command_buffer_t *command_buffer,
   iree_hal_channel_t *channel,
   iree_hal_collective_op_t op,
@@ -172,20 +172,20 @@ strela_command_buffer_collective(
 }
 
 static const iree_hal_command_buffer_vtable_t
-strela_command_buffer_vtable = {
-  .destroy           = strela_command_buffer_destroy,
-  .begin             = strela_command_buffer_begin,
-  .end               = strela_command_buffer_end,
-  .begin_debug_group = strela_command_buffer_begin_debug_group,
-  .end_debug_group   = strela_command_buffer_end_debug_group,
-  .execution_barrier = strela_command_buffer_execution_barrier,
-  .signal_event      = strela_command_buffer_signal_event,
-  .reset_event       = strela_command_buffer_reset_event,
-  .wait_events       = strela_command_buffer_wait_events,
-  .advise_buffer     = strela_command_buffer_advise_buffer,
-  .fill_buffer       = strela_command_buffer_fill_buffer,
-  .update_buffer     = strela_command_buffer_update_buffer,
-  .copy_buffer       = strela_command_buffer_copy_buffer,
-  .collective        = strela_command_buffer_collective,
-  .dispatch          = strela_command_buffer_dispatch,
+iree_hal_strela_command_buffer_vtable = {
+  .destroy           = iree_hal_strela_command_buffer_destroy,
+  .begin             = iree_hal_strela_command_buffer_begin,
+  .end               = iree_hal_strela_command_buffer_end,
+  .begin_debug_group = iree_hal_strela_command_buffer_begin_debug_group,
+  .end_debug_group   = iree_hal_strela_command_buffer_end_debug_group,
+  .execution_barrier = iree_hal_strela_command_buffer_execution_barrier,
+  .signal_event      = iree_hal_strela_command_buffer_signal_event,
+  .reset_event       = iree_hal_strela_command_buffer_reset_event,
+  .wait_events       = iree_hal_strela_command_buffer_wait_events,
+  .advise_buffer     = iree_hal_strela_command_buffer_advise_buffer,
+  .fill_buffer       = iree_hal_strela_command_buffer_fill_buffer,
+  .update_buffer     = iree_hal_strela_command_buffer_update_buffer,
+  .copy_buffer       = iree_hal_strela_command_buffer_copy_buffer,
+  .collective        = iree_hal_strela_command_buffer_collective,
+  .dispatch          = iree_hal_strela_command_buffer_dispatch,
 };

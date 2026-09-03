@@ -1,19 +1,19 @@
-typedef struct iree_hal_strela_device_options_t {
+typedef struct iree_hal_iree_hal_strela_device_options_t {
   int reserved;
-} iree_hal_strela_device_options_t;
+} iree_hal_iree_hal_strela_device_options_t;
 
 typedef struct {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
 
   iree_string_view_t identifier;
-  iree_hal_strela_device_options_t options;
+  iree_hal_iree_hal_strela_device_options_t options;
 
   // add stuff here
-} strela_driver_t;
+} iree_hal_strela_driver_t;
 
 static iree_status_t
-strela_driver_create_device_by_id(
+iree_hal_strela_driver_create_device_by_id(
   iree_hal_driver_t *base_driver,
   iree_hal_device_id_t device_id,
   iree_host_size_t param_count,
@@ -24,25 +24,25 @@ strela_driver_create_device_by_id(
 ) {
   printf("%s\n", __func__);
 
-  [[maybe_unused]] strela_driver_t* driver = (strela_driver_t*)base_driver;
+  [[maybe_unused]] iree_hal_strela_driver_t* driver = (iree_hal_strela_driver_t*)base_driver;
 
-  // 1. Allocate your custom strela_device_t
-  strela_device_t* device = NULL;
+  // 1. Allocate your custom iree_hal_strela_device_t
+  iree_hal_strela_device_t* device = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *device, (void **)&device));
   memset(device, 0, sizeof *device);
 
   // 2. Initialize the basics
-  iree_hal_resource_initialize(&strela_device_vtable, &device->resource);
+  iree_hal_resource_initialize(&iree_hal_strela_device_vtable, &device->resource);
   iree_string_view_t identifier = iree_string_view_literal("strela-fpga-0");
   device->host_allocator = host_allocator;
   device->identifier = identifier;
 
   {
-    strela_allocator_t *allocator = NULL;
+    iree_hal_strela_allocator_t *allocator = NULL;
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof *allocator, (void**)&allocator));
     memset(allocator, 0, sizeof *allocator);
 
-    iree_hal_resource_initialize(&strela_allocator_vtable, &allocator->resource);
+    iree_hal_resource_initialize(&iree_hal_strela_allocator_vtable, &allocator->resource);
 
     allocator->dev = device->dev;
     allocator->host_allocator = host_allocator;
@@ -55,8 +55,8 @@ strela_driver_create_device_by_id(
 }
 
 static void
-strela_driver_destroy(iree_hal_driver_t *base_driver) {
-  strela_driver_t *driver = (strela_driver_t *)base_driver;
+iree_hal_strela_driver_destroy(iree_hal_driver_t *base_driver) {
+  iree_hal_strela_driver_t *driver = (iree_hal_strela_driver_t *)base_driver;
   iree_allocator_t host_allocator = driver->host_allocator;
 
   // Perform any additional driver teardown here if necessary
@@ -65,7 +65,7 @@ strela_driver_destroy(iree_hal_driver_t *base_driver) {
 }
 
 static iree_status_t
-strela_driver_query_available_devices(
+iree_hal_strela_driver_query_available_devices(
   iree_hal_driver_t *base_driver,
   iree_allocator_t host_allocator,
   iree_host_size_t *out_device_info_count,
@@ -89,7 +89,7 @@ strela_driver_query_available_devices(
 }
 
 static iree_status_t
-strela_driver_dump_device_info(
+iree_hal_strela_driver_dump_device_info(
   iree_hal_driver_t *base_driver,
   iree_hal_device_id_t device_id,
   iree_string_builder_t* builder
@@ -100,7 +100,7 @@ strela_driver_dump_device_info(
 }
 
 static iree_status_t
-strela_driver_create_device_by_path(
+iree_hal_strela_driver_create_device_by_path(
   iree_hal_driver_t *base_driver,
   iree_string_view_t driver_name,
   iree_string_view_t device_path,
@@ -119,17 +119,17 @@ strela_driver_create_device_by_path(
   // return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 
   // Fall back to creating by ID (ID 0)
-  return strela_driver_create_device_by_id(
+  return iree_hal_strela_driver_create_device_by_id(
    base_driver, 0, param_count, params,
    NULL, host_allocator, out_device
   );
 }
 
 static const iree_hal_driver_vtable_t
-strela_driver_vtable = {
-  .destroy = strela_driver_destroy,
-  .query_available_devices = strela_driver_query_available_devices,
-  .dump_device_info = strela_driver_dump_device_info,
-  .create_device_by_id = strela_driver_create_device_by_id,
-  .create_device_by_path = strela_driver_create_device_by_path,
+iree_hal_strela_driver_vtable = {
+  .destroy = iree_hal_strela_driver_destroy,
+  .query_available_devices = iree_hal_strela_driver_query_available_devices,
+  .dump_device_info = iree_hal_strela_driver_dump_device_info,
+  .create_device_by_id = iree_hal_strela_driver_create_device_by_id,
+  .create_device_by_path = iree_hal_strela_driver_create_device_by_path,
 };

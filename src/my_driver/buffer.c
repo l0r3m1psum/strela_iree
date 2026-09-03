@@ -1,24 +1,24 @@
-typedef struct strela_buffer_t {
+typedef struct iree_hal_strela_buffer_t {
   iree_hal_buffer_t base;
   iree_allocator_t host_allocator;
   iree_hal_buffer_release_callback_t release_callback;
 
   strela_buffer s_buf;
   void *host_ptr;
-} strela_buffer_t;
+} iree_hal_strela_buffer_t;
 
 static void
-strela_buffer_recycle(iree_hal_buffer_t* buffer) {
+iree_hal_strela_buffer_recycle(iree_hal_buffer_t* buffer) {
   printf("%s\n", __func__);
 }
 
 static void
-strela_buffer_destroy(iree_hal_buffer_t* buffer) {
+iree_hal_strela_buffer_destroy(iree_hal_buffer_t* buffer) {
   printf("%s\n", __func__);
 }
 
 static iree_status_t
-strela_buffer_map_range(
+iree_hal_strela_buffer_map_range(
   iree_hal_buffer_t *base_buffer,
   iree_hal_mapping_mode_t mapping_mode,
   iree_hal_memory_access_t memory_access,
@@ -28,7 +28,7 @@ strela_buffer_map_range(
 ) {
   printf("%s\n", __func__);
 
-  strela_buffer_t *buffer = (strela_buffer_t *)base_buffer;
+  iree_hal_strela_buffer_t *buffer = (iree_hal_strela_buffer_t *)base_buffer;
   if (!buffer->host_ptr) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE, "STRELA buffer is not host-accessible");
   }
@@ -39,7 +39,7 @@ strela_buffer_map_range(
 }
 
 static iree_status_t
-strela_buffer_unmap_range(
+iree_hal_strela_buffer_unmap_range(
   iree_hal_buffer_t *buffer,
   iree_device_size_t local_byte_offset,
   iree_device_size_t local_byte_length,
@@ -50,7 +50,7 @@ strela_buffer_unmap_range(
 }
 
 static iree_status_t
-strela_buffer_invalidate_range(
+iree_hal_strela_buffer_invalidate_range(
   iree_hal_buffer_t *buffer,
   iree_device_size_t local_byte_offset,
   iree_device_size_t local_byte_length
@@ -59,7 +59,7 @@ strela_buffer_invalidate_range(
 }
 
 static iree_status_t
-strela_buffer_flush_range(
+iree_hal_strela_buffer_flush_range(
   iree_hal_buffer_t *buffer,
   iree_device_size_t local_byte_offset,
   iree_device_size_t local_byte_length
@@ -68,11 +68,11 @@ strela_buffer_flush_range(
 }
 
 static const iree_hal_buffer_vtable_t
-strela_buffer_vtable = {
-  .recycle          = strela_buffer_recycle,
-  .destroy          = strela_buffer_destroy,
-  .map_range        = strela_buffer_map_range,
-  .unmap_range      = strela_buffer_unmap_range,
-  .invalidate_range = strela_buffer_invalidate_range,
-  .flush_range      = strela_buffer_flush_range,
+iree_hal_strela_buffer_vtable = {
+  .recycle          = iree_hal_strela_buffer_recycle,
+  .destroy          = iree_hal_strela_buffer_destroy,
+  .map_range        = iree_hal_strela_buffer_map_range,
+  .unmap_range      = iree_hal_strela_buffer_unmap_range,
+  .invalidate_range = iree_hal_strela_buffer_invalidate_range,
+  .flush_range      = iree_hal_strela_buffer_flush_range,
 };

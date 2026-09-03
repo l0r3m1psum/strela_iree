@@ -2,10 +2,10 @@ typedef struct {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
   strela_dev *dev;
-} strela_allocator_t;
+} iree_hal_strela_allocator_t;
 
 static iree_status_t
-strela_allocator_allocate_buffer(
+iree_hal_strela_allocator_allocate_buffer(
   iree_hal_allocator_t *IREE_RESTRICT base_allocator,
   const iree_hal_buffer_params_t *IREE_RESTRICT  params,
   iree_device_size_t allocation_size,
@@ -13,7 +13,7 @@ strela_allocator_allocate_buffer(
 ) {
   printf("%s\n", __func__);
 
-  strela_allocator_t *allocator = (strela_allocator_t *)base_allocator;
+  iree_hal_strela_allocator_t *allocator = (iree_hal_strela_allocator_t *)base_allocator;
 
   // NOTE: You should move `strela_dev_init(0)` to your driver/allocator initialization!
   // Calling it here means you initialize the hardware on every single buffer allocation.
@@ -28,7 +28,7 @@ strela_allocator_allocate_buffer(
   void *host_ptr = strela_buffer_to_ptr(allocator->dev, s_buf);
 
   // 1. Allocate memory for your custom wrapper struct
-  strela_buffer_t *buffer = NULL;
+  iree_hal_strela_buffer_t *buffer = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(allocator->host_allocator, sizeof(*buffer), (void**)&buffer));
 
   // 2. Save your hardware state and allocator config
@@ -51,7 +51,7 @@ strela_allocator_allocate_buffer(
     actual_type,                     // Memory type (host-visible, device-local, etc.)
     actual_access,                   // Allowed access (read/write)
     actual_usage,                    // Allowed usage (transfer, dispatch)
-    &strela_buffer_vtable,            // Your custom vtable
+    &iree_hal_strela_buffer_vtable,            // Your custom vtable
     &buffer->base                     // Output pointer to the base iree_hal_buffer_t
   );
 
@@ -62,22 +62,22 @@ strela_allocator_allocate_buffer(
 }
 
 static void
-strela_allocator_destroy(iree_hal_allocator_t *base_allocator) {
-  [[maybe_unused]] strela_allocator_t *allocator = (strela_allocator_t*)base_allocator;
+iree_hal_strela_allocator_destroy(iree_hal_allocator_t *base_allocator) {
+  [[maybe_unused]] iree_hal_strela_allocator_t *allocator = (iree_hal_strela_allocator_t*)base_allocator;
 
   iree_allocator_free(allocator->host_allocator, allocator);
 }
 
 static iree_allocator_t
-strela_allocator_host_allocator(
+iree_hal_strela_allocator_host_allocator(
   const iree_hal_allocator_t *base_allocator
 ) {
   printf("%s base_allocator: 0x%p\n", __func__, base_allocator);
-  return ((strela_allocator_t *)base_allocator)->host_allocator;
+  return ((iree_hal_strela_allocator_t *)base_allocator)->host_allocator;
 }
 
 static iree_status_t
-strela_allocator_trim(
+iree_hal_strela_allocator_trim(
   iree_hal_allocator_t *base_allocator
 ) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
@@ -85,7 +85,7 @@ strela_allocator_trim(
 }
 
 static void
-strela_allocator_deallocate_buffer(
+iree_hal_strela_allocator_deallocate_buffer(
   iree_hal_allocator_t *base_allocator,
   iree_hal_buffer_t *base_buffer
 ) {
@@ -93,7 +93,7 @@ strela_allocator_deallocate_buffer(
 }
 
 static void
-strela_allocator_query_statistics(
+iree_hal_strela_allocator_query_statistics(
   iree_hal_allocator_t *base_allocator,
   iree_hal_allocator_statistics_t *out_statistics
 ) {
@@ -101,7 +101,7 @@ strela_allocator_query_statistics(
 }
 
 static iree_status_t
-strela_allocator_query_memory_heaps(
+iree_hal_strela_allocator_query_memory_heaps(
   iree_hal_allocator_t *base_allocator,
   iree_host_size_t capacity,
   iree_hal_allocator_memory_heap_t *heaps,
@@ -119,7 +119,7 @@ strela_allocator_query_memory_heaps(
 }
 
 static iree_hal_buffer_compatibility_t
-strela_allocator_query_buffer_compatibility(
+iree_hal_strela_allocator_query_buffer_compatibility(
   iree_hal_allocator_t *base_allocator,
   iree_hal_buffer_params_t *params,
   iree_device_size_t *allocation_size
@@ -136,7 +136,7 @@ strela_allocator_query_buffer_compatibility(
 }
 
 static iree_status_t
-strela_allocator_import_buffer(
+iree_hal_strela_allocator_import_buffer(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   const iree_hal_buffer_params_t *IREE_RESTRICT params,
   iree_hal_external_buffer_t *IREE_RESTRICT external_buffer,
@@ -147,7 +147,7 @@ strela_allocator_import_buffer(
 }
 
 static iree_status_t
-strela_allocator_export_buffer(
+iree_hal_strela_allocator_export_buffer(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_buffer_t *IREE_RESTRICT buffer,
   iree_hal_external_buffer_type_t requested_type,
@@ -158,14 +158,14 @@ strela_allocator_export_buffer(
 }
 
 static bool
-strela_allocator_supports_virtual_memory(
+iree_hal_strela_allocator_supports_virtual_memory(
   iree_hal_allocator_t *IREE_RESTRICT allocator
 ) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
-strela_allocator_virtual_memory_query_granularity(
+iree_hal_strela_allocator_virtual_memory_query_granularity(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_buffer_params_t params,
   iree_device_size_t *IREE_RESTRICT out_minimum_page_size,
@@ -175,7 +175,7 @@ strela_allocator_virtual_memory_query_granularity(
 }
 
 static iree_status_t
-strela_allocator_virtual_memory_reserve(
+iree_hal_strela_allocator_virtual_memory_reserve(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
   iree_hal_buffer_t **IREE_RESTRICT out_virtual_buffer
@@ -184,7 +184,7 @@ strela_allocator_virtual_memory_reserve(
 }
 
 static iree_status_t
-strela_allocator_virtual_memory_release(
+iree_hal_strela_allocator_virtual_memory_release(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_buffer_t *IREE_RESTRICT virtual_buffer
 ) {
@@ -192,7 +192,7 @@ strela_allocator_virtual_memory_release(
 }
 
 static iree_status_t
-strela_allocator_physical_memory_allocate(
+iree_hal_strela_allocator_physical_memory_allocate(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_buffer_params_t params, iree_device_size_t size,
   iree_allocator_t host_allocator,
@@ -202,7 +202,7 @@ strela_allocator_physical_memory_allocate(
 }
 
 static iree_status_t
-strela_allocator_physical_memory_free(
+iree_hal_strela_allocator_physical_memory_free(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_physical_memory_t *IREE_RESTRICT physical_memory
 ) {
@@ -210,7 +210,7 @@ strela_allocator_physical_memory_free(
 }
 
 static iree_status_t
-strela_allocator_virtual_memory_map(
+iree_hal_strela_allocator_virtual_memory_map(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_buffer_t *IREE_RESTRICT virtual_buffer,
   iree_device_size_t virtual_offset,
@@ -221,7 +221,7 @@ strela_allocator_virtual_memory_map(
 }
 
 static iree_status_t
-strela_allocator_virtual_memory_unmap(
+iree_hal_strela_allocator_virtual_memory_unmap(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_buffer_t *IREE_RESTRICT virtual_buffer,
   iree_device_size_t virtual_offset, iree_device_size_t size
@@ -230,7 +230,7 @@ strela_allocator_virtual_memory_unmap(
 }
 
 static iree_status_t
-strela_allocator_virtual_memory_protect(
+iree_hal_strela_allocator_virtual_memory_protect(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_buffer_t *IREE_RESTRICT virtual_buffer,
   iree_device_size_t virtual_offset, iree_device_size_t size,
@@ -241,7 +241,7 @@ strela_allocator_virtual_memory_protect(
 }
 
 static iree_status_t
-strela_allocator_virtual_memory_advise(
+iree_hal_strela_allocator_virtual_memory_advise(
   iree_hal_allocator_t *IREE_RESTRICT allocator,
   iree_hal_buffer_t *IREE_RESTRICT virtual_buffer,
   iree_device_size_t virtual_offset, iree_device_size_t size,
@@ -252,26 +252,26 @@ strela_allocator_virtual_memory_advise(
 }
 
 static const iree_hal_allocator_vtable_t
-strela_allocator_vtable = {
-  .destroy                    = strela_allocator_destroy,
-  .host_allocator             = strela_allocator_host_allocator,
-  .trim                       = strela_allocator_trim,
-  .query_statistics           = strela_allocator_query_statistics,
-  .query_memory_heaps         = strela_allocator_query_memory_heaps,
-  .query_buffer_compatibility = strela_allocator_query_buffer_compatibility,
-  .allocate_buffer            = strela_allocator_allocate_buffer,
-  .deallocate_buffer          = strela_allocator_deallocate_buffer,
-  .import_buffer              = strela_allocator_import_buffer,
-  .export_buffer              = strela_allocator_export_buffer,
+iree_hal_strela_allocator_vtable = {
+  .destroy                    = iree_hal_strela_allocator_destroy,
+  .host_allocator             = iree_hal_strela_allocator_host_allocator,
+  .trim                       = iree_hal_strela_allocator_trim,
+  .query_statistics           = iree_hal_strela_allocator_query_statistics,
+  .query_memory_heaps         = iree_hal_strela_allocator_query_memory_heaps,
+  .query_buffer_compatibility = iree_hal_strela_allocator_query_buffer_compatibility,
+  .allocate_buffer            = iree_hal_strela_allocator_allocate_buffer,
+  .deallocate_buffer          = iree_hal_strela_allocator_deallocate_buffer,
+  .import_buffer              = iree_hal_strela_allocator_import_buffer,
+  .export_buffer              = iree_hal_strela_allocator_export_buffer,
 
-  .supports_virtual_memory          = strela_allocator_supports_virtual_memory,
-  .virtual_memory_query_granularity = strela_allocator_virtual_memory_query_granularity,
-  .virtual_memory_reserve           = strela_allocator_virtual_memory_reserve,
-  .virtual_memory_release           = strela_allocator_virtual_memory_release,
-  .physical_memory_allocate         = strela_allocator_physical_memory_allocate,
-  .physical_memory_free             = strela_allocator_physical_memory_free,
-  .virtual_memory_map               = strela_allocator_virtual_memory_map,
-  .virtual_memory_unmap             = strela_allocator_virtual_memory_unmap,
-  .virtual_memory_protect           = strela_allocator_virtual_memory_protect,
-  .virtual_memory_advise            = strela_allocator_virtual_memory_advise,
+  .supports_virtual_memory          = iree_hal_strela_allocator_supports_virtual_memory,
+  .virtual_memory_query_granularity = iree_hal_strela_allocator_virtual_memory_query_granularity,
+  .virtual_memory_reserve           = iree_hal_strela_allocator_virtual_memory_reserve,
+  .virtual_memory_release           = iree_hal_strela_allocator_virtual_memory_release,
+  .physical_memory_allocate         = iree_hal_strela_allocator_physical_memory_allocate,
+  .physical_memory_free             = iree_hal_strela_allocator_physical_memory_free,
+  .virtual_memory_map               = iree_hal_strela_allocator_virtual_memory_map,
+  .virtual_memory_unmap             = iree_hal_strela_allocator_virtual_memory_unmap,
+  .virtual_memory_protect           = iree_hal_strela_allocator_virtual_memory_protect,
+  .virtual_memory_advise            = iree_hal_strela_allocator_virtual_memory_advise,
 };
