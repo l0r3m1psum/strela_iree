@@ -37,6 +37,8 @@ struct StrelaTargetBackend : public IREE::HAL::TargetBackend {
     // Here we should convert linalg to the strela dialect...
   }
 
+  // TODO: how does this relate to StrelaTargetDevice::getDefaultDeviceTarget?
+  // Can some code between the two be reused?
   void
   getDefaultExecutableTargets(
     MLIRContext *context,
@@ -100,16 +102,42 @@ struct StrelaTargetDevice : public IREE::HAL::TargetDevice {
   ) const override {
     mlir::Builder b(context);
 
-    SmallVector<NamedAttribute, 0> configItems;
+    // With
+    // iree-compile --iree-plugin=example2  --iree-hal-target-device=strela --compile-to=stream 3rdparty/iree/samples/models/simple_abs.mlir   -o simple_abs_hal.mlir
+    // this #stream.resource_config appears in the MLIR source.
+    auto resourceConfigAttr = b.getAttr<IREE::Stream::ResourceConfigAttr>(
+      // TODO: put real numbers...
+      /*max_allocation_size=*/ 1ull * 1024 * 1024 * 1024,
+      /*min_buffer_offset_alignment=*/ 256,
+      /*max_buffer_range=*/ 256,
+      /*min_buffer_range_alignment=*/ 256,
+      /*index_bits=*/ 0,
+      /*alias_mutable_bindings=*/ false,
+      /*memory_model=*/ IREE::Stream::MemoryModel::Unified
+    );
+
+    SmallVector<NamedAttribute> configItems;
+    configItems.emplace_back(
+      b.getStringAttr("stream.resource_config"), resourceConfigAttr
+    );
+
     auto configAttr = b.getDictionaryAttr(configItems);
     auto deviceID = b.getStringAttr("strela");
 
+    // With
+    // iree-compile --iree-plugin=example2  --iree-hal-target-device=strela --compile-to=hal 3rdparty/iree/samples/models/simple_abs.mlir   -o simple_abs_hal.mlir
+    // this #hal.executable.target appears in the MLIR source.
     auto executableTargetAttr = b.getAttr<IREE::HAL::ExecutableTargetAttr>(
-      deviceID, b.getStringAttr("custom"), configAttr
+      /*backend=*/ deviceID,
+      /*format=*/ b.getStringAttr("custom"),
+      /*configuration=*/ b.getDictionaryAttr({})
     );
 
     return IREE::HAL::DeviceTargetAttr::get(
-      context, deviceID, configAttr, {executableTargetAttr}
+      context,
+      /*deviceID=*/ deviceID,
+      /*configuration=*/ configAttr,
+      /*executable_targets=*/ {executableTargetAttr}
     );
   }
 };
