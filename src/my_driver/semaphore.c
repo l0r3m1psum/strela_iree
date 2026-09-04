@@ -4,6 +4,60 @@ typedef struct iree_hal_strela_semaphore_t {
   iree_atomic_int64_t payload_value;
 } iree_hal_strela_semaphore_t;
 
+static const iree_hal_semaphore_vtable_t iree_hal_strela_semaphore_vtable;
+
+static iree_hal_strela_semaphore_t *
+iree_hal_strela_semaphore_cast(iree_hal_semaphore_t *base_value) {
+  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_semaphore_vtable);
+  return (iree_hal_strela_semaphore_t *)base_value;
+}
+
+static iree_status_t
+iree_hal_strela_semaphore_create(
+  iree_async_proactor_t *proactor,
+  iree_hal_queue_affinity_t queue_affinity,
+  uint64_t initial_value,
+  iree_hal_semaphore_flags_t flags,
+  iree_allocator_t host_allocator,
+  iree_hal_semaphore_t **out_semaphore
+) {
+  iree_status_t status = iree_ok_status();
+  iree_hal_strela_semaphore_t *semaphore = NULL;
+  iree_hal_semaphore_t *async_semaphore = NULL;
+
+  iree_host_size_t frontier_offset = 0, total_size = 0;
+  status = iree_async_semaphore_layout(
+    sizeof *semaphore, 0, &frontier_offset, &total_size
+  );
+
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(
+      host_allocator, total_size, (void **)&semaphore
+    );
+  }
+
+  if (iree_status_is_ok(status)) {
+    iree_async_semaphore_initialize(
+      (const iree_async_semaphore_vtable_t *)&iree_hal_strela_semaphore_vtable,
+      proactor,
+      initial_value,
+      frontier_offset,
+      0,
+      &semaphore->async
+    );
+    semaphore->host_allocator = host_allocator;
+    async_semaphore = iree_hal_semaphore_cast(&semaphore->async);
+  }
+
+  if (!iree_status_is_ok(status) && async_semaphore) {
+    iree_hal_semaphore_release(async_semaphore);
+  }
+
+  *out_semaphore = async_semaphore;
+  return status;
+}
+
+
 static iree_status_t
 iree_hal_strela_semaphore_wait(
   iree_hal_semaphore_t *semaphore,

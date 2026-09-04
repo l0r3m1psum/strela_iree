@@ -3,6 +3,45 @@ typedef struct iree_hal_strela_executable_cache_t {
   iree_allocator_t host_allocator;
 } iree_hal_strela_executable_cache_t;
 
+static const iree_hal_executable_cache_vtable_t iree_hal_strela_executable_cache_vtable;
+
+static iree_hal_strela_executable_cache_t *
+iree_hal_strela_executable_cache_cast(iree_hal_executable_cache_t *base_value) {
+  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_executable_cache_vtable);
+  return (iree_hal_strela_executable_cache_t *)base_value;
+}
+
+static iree_status_t
+iree_hal_strela_executable_cache_create(
+  iree_string_view_t identifier,
+  iree_allocator_t host_allocator,
+  iree_hal_executable_cache_t **out_executable_cache
+) {
+  iree_status_t status = iree_ok_status();
+  iree_hal_strela_executable_cache_t* executable_cache = NULL;
+
+  status = iree_allocator_malloc(
+    host_allocator, sizeof *executable_cache, (void **)&executable_cache
+  );
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_resource_initialize(
+      &iree_hal_strela_executable_cache_vtable, &executable_cache->resource
+    );
+    executable_cache->host_allocator = host_allocator;
+  }
+
+  if (!iree_status_is_ok(status) && executable_cache) {
+    iree_hal_executable_cache_release(
+      (iree_hal_executable_cache_t *)executable_cache
+    );
+  }
+
+  *out_executable_cache = (iree_hal_executable_cache_t*)executable_cache;
+  return status;
+}
+
+
 static void
 iree_hal_strela_executable_cache_destroy(iree_hal_executable_cache_t *executable_cache) {
   ;

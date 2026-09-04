@@ -4,6 +4,59 @@ typedef struct {
   // Internal ring buffer or array to store recorded STRELA commands
 } iree_hal_strela_command_buffer_t;
 
+static const iree_hal_command_buffer_vtable_t iree_hal_strela_command_buffer_vtable;
+
+static iree_hal_strela_command_buffer_t *
+iree_hal_strela_command_buffer_cast(iree_hal_command_buffer_t *base_value) {
+  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_command_buffer_vtable);
+  return (iree_hal_strela_command_buffer_t *)base_value;
+}
+
+static iree_status_t
+iree_hal_strela_command_buffer_create(
+  iree_hal_allocator_t* device_allocator,
+  iree_hal_command_buffer_mode_t mode,
+  iree_hal_command_category_t command_categories,
+  iree_hal_queue_affinity_t queue_affinity,
+  iree_host_size_t binding_capacity,
+  iree_allocator_t host_allocator,
+  iree_hal_command_buffer_t **out_command_buffer
+) {
+  iree_status_t status = iree_ok_status();
+  iree_hal_strela_command_buffer_t *command_buffer = NULL;
+  iree_hal_command_buffer_t *command_buffer_base = NULL;
+
+  iree_host_size_t command_buffer_validation_state_size
+    = iree_hal_command_buffer_validation_state_size(mode, binding_capacity);
+  status = iree_allocator_malloc(
+    host_allocator,
+    sizeof *command_buffer + command_buffer_validation_state_size,
+    (void **)&command_buffer
+  );
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_command_buffer_initialize(
+      device_allocator,
+      mode,
+      command_categories,
+      queue_affinity,
+      binding_capacity,
+      (uint8_t *)command_buffer + sizeof *command_buffer,
+      &iree_hal_strela_command_buffer_vtable,
+      &command_buffer->base
+    );
+    command_buffer->host_allocator = host_allocator;
+    command_buffer_base = &command_buffer->base;
+  }
+
+  if (!iree_status_is_ok(status) && command_buffer_base) {
+    iree_hal_command_buffer_release(command_buffer_base);
+  }
+
+  *out_command_buffer = command_buffer_base;
+  return status;
+}
+
 static iree_status_t
 iree_hal_strela_command_buffer_dispatch(
   iree_hal_command_buffer_t *base_command_buffer,
