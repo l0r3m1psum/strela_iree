@@ -122,7 +122,7 @@ iree_hal_strela_command_buffer_execution_barrier(
   const iree_hal_buffer_barrier_t *buffer_barriers
 ) {
   printf("%s\n", __func__);
-  iree_hal_null_command_buffer_t *command_buffer = iree_hal_null_command_buffer_cast(base_command_buffer);
+  iree_hal_strela_command_buffer_t *command_buffer = iree_hal_strela_command_buffer_cast(base_command_buffer);
 
   (void)command_buffer;
 
@@ -135,7 +135,7 @@ iree_hal_strela_command_buffer_signal_event(
   iree_hal_event_t *event,
   iree_hal_execution_stage_t source_stage_mask
 ) {
-  iree_hal_null_command_buffer_t *command_buffer = iree_hal_null_command_buffer_cast(base_command_buffer);
+  iree_hal_strela_command_buffer_t *command_buffer = iree_hal_strela_command_buffer_cast(base_command_buffer);
 
   (void)command_buffer;
 
@@ -148,7 +148,7 @@ iree_hal_strela_command_buffer_reset_event(
   iree_hal_event_t *event,
   iree_hal_execution_stage_t source_stage_mask
 ) {
-  iree_hal_null_command_buffer_t *command_buffer = iree_hal_null_command_buffer_cast(base_command_buffer);
+  iree_hal_strela_command_buffer_t *command_buffer = iree_hal_strela_command_buffer_cast(base_command_buffer);
 
   (void)command_buffer;
 
@@ -167,7 +167,7 @@ iree_hal_strela_command_buffer_wait_events(
   iree_host_size_t buffer_barrier_count,
   const iree_hal_buffer_barrier_t *buffer_barriers
 ) {
-  iree_hal_null_command_buffer_t *command_buffer = iree_hal_null_command_buffer_cast(base_command_buffer);
+  iree_hal_strela_command_buffer_t *command_buffer = iree_hal_strela_command_buffer_cast(base_command_buffer);
 
   (void)command_buffer;
 
@@ -182,7 +182,7 @@ iree_hal_strela_command_buffer_advise_buffer(
   uint64_t arg0,
   uint64_t arg1
 ) {
-  iree_hal_null_command_buffer_t *command_buffer = iree_hal_null_command_buffer_cast(base_command_buffer);
+  iree_hal_strela_command_buffer_t *command_buffer = iree_hal_strela_command_buffer_cast(base_command_buffer);
 
   (void)command_buffer;
 
@@ -197,7 +197,7 @@ iree_hal_strela_command_buffer_fill_buffer(
   iree_host_size_t pattern_length,
   iree_hal_fill_flags_t flags
 ) {
-  iree_hal_null_command_buffer_t *command_buffer = iree_hal_null_command_buffer_cast(base_command_buffer);
+  iree_hal_strela_command_buffer_t *command_buffer = iree_hal_strela_command_buffer_cast(base_command_buffer);
 
   (void)command_buffer;
 
@@ -223,7 +223,7 @@ iree_hal_strela_command_buffer_copy_buffer(
   iree_hal_copy_flags_t flags
 ) {
   printf("%s\n", __func__);
-  iree_hal_null_command_buffer_t *command_buffer = iree_hal_null_command_buffer_cast(base_command_buffer);
+  iree_hal_strela_command_buffer_t *command_buffer = iree_hal_strela_command_buffer_cast(base_command_buffer);
 
   (void)command_buffer;
 
@@ -240,7 +240,7 @@ iree_hal_strela_command_buffer_collective(
   iree_hal_buffer_ref_t recv_ref,
   iree_device_size_t element_count
 ) {
-  iree_hal_null_command_buffer_t *command_buffer = iree_hal_null_command_buffer_cast(base_command_buffer);
+  iree_hal_strela_command_buffer_t *command_buffer = iree_hal_strela_command_buffer_cast(base_command_buffer);
 
   (void)command_buffer;
 
@@ -258,7 +258,7 @@ iree_hal_strela_command_buffer_dispatch(
   iree_hal_dispatch_flags_t dispatch_flags
 ) {
   printf("%s\n", __func__);
-  iree_hal_null_command_buffer_t *command_buffer = iree_hal_null_command_buffer_cast(base_command_buffer);
+  iree_hal_strela_command_buffer_t *command_buffer = iree_hal_strela_command_buffer_cast(base_command_buffer);
 
   (void)command_buffer;
 
