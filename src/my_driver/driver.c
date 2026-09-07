@@ -177,12 +177,16 @@ iree_hal_strela_driver_create_device_by_path(
     (int)driver_name.size, driver_name.data,
     (int)device_path.size, device_path.data
   );
-  // return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 
-  // Fall back to creating by ID (ID 0)
+  iree_hal_device_id_t device_id = 0;
   return iree_hal_strela_driver_create_device_by_id(
-    base_driver, 0, param_count, params,
-    device_create_params, host_allocator, out_device
+    base_driver,
+    device_id,
+    param_count,
+    params,
+    device_create_params,
+    host_allocator,
+    out_device
   );
 }
 

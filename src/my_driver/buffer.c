@@ -62,6 +62,7 @@ iree_hal_strela_buffer_wrap(
     buffer->host_allocator = host_allocator;
     buffer->release_callback = release_callback;
     buffer->s_buf = s_buf;
+    buffer->host_ptr = host_ptr;
     buffer_base = &buffer->base;
   }
 

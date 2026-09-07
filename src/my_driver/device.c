@@ -64,21 +64,22 @@ iree_hal_strela_device_create(
   iree_hal_device_t **out_device
 ) {
   iree_status_t status = iree_ok_status();
-
-  status = iree_hal_strela_device_options_verify(options);
-
   iree_hal_strela_device_t *device = NULL;
   iree_host_size_t total_size = sizeof *device + identifier.size;
 
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(host_allocator, total_size, (void**)&device);
+    status = iree_hal_strela_device_options_verify(options);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, total_size, (void **)&device);
   }
 
   if (iree_status_is_ok(status)) {
     iree_hal_resource_initialize(&iree_hal_strela_device_vtable, &device->resource);
     iree_string_view_append_to_buffer(
       identifier, &device->identifier,
-      (char*)device + total_size - identifier.size
+      (char *)device + total_size - identifier.size
     );
     device->host_allocator = host_allocator;
     device->proactor_pool = create_params->proactor_pool;
@@ -98,11 +99,13 @@ iree_hal_strela_device_create(
     );
   }
 
-  if (!iree_status_is_ok(status) && device) {
-    iree_hal_device_release((iree_hal_device_t*)device);
+  if (!iree_status_is_ok(status)) {
+    if (device) {
+      iree_hal_device_release((iree_hal_device_t *)device);
+    }
   }
 
-  *out_device = (iree_hal_device_t*)device;
+  *out_device = (iree_hal_device_t *)device;
 
   return status;
 }
@@ -199,7 +202,7 @@ iree_hal_strela_device_query_i64(
     value = iree_string_view_match_pattern(device->identifier, key) ? 1 : 0;
     status = iree_ok_status();
   } else if (iree_string_view_equal(category, IREE_SV("hal.executable.format"))) {
-    value = iree_string_view_equal(key, IREE_SV("strela_bistream"));
+    value = iree_string_view_equal(key, IREE_SV("custom"));
     status = iree_ok_status();
   } else if (iree_string_view_equal(category, IREE_SV("hal.device"))) {
     // TODO: verify if this is true or not for STRELA
@@ -420,7 +423,7 @@ iree_hal_strela_device_queue_alloca(
   iree_hal_buffer_params_t params,
   iree_device_size_t allocation_size,
   iree_hal_alloca_flags_t flags,
-  iree_hal_buffer_t **IREE_RESTRICT out_buffer
+  iree_hal_buffer_t **out_buffer
 ) {
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
 

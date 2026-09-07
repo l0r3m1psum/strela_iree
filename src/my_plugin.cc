@@ -47,7 +47,7 @@ struct StrelaTargetBackend : public IREE::HAL::TargetBackend {
     SmallVectorImpl<IREE::HAL::ExecutableTargetAttr> &executableTargetAttrs
   ) const override {
     Builder b(context);
-    SmallVector<NamedAttribute, 0> configItems;
+    SmallVector<NamedAttribute> configItems;
 
     auto executableTargetAttr = b.getAttr<IREE::HAL::ExecutableTargetAttr>(
       b.getStringAttr("strela"), b.getStringAttr("custom"), b.getDictionaryAttr(configItems)
@@ -78,8 +78,8 @@ struct StrelaTargetBackend : public IREE::HAL::TargetBackend {
     StrelaExecutableHeader header;
     header.opcode = detected_opcode;
 
-    std::vector<uint8_t> binary_payload(sizeof(StrelaExecutableHeader));
-    std::memcpy(binary_payload.data(), &header, sizeof(StrelaExecutableHeader));
+    std::vector<uint8_t> binary_payload(sizeof header);
+    std::memcpy(binary_payload.data(), &header, sizeof header);
 
     IREE::HAL::ExecutableBinaryOp::create(
       executableBuilder,
