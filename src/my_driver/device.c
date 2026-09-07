@@ -50,7 +50,7 @@ typedef struct {
 static const iree_hal_device_vtable_t iree_hal_strela_device_vtable;
 
 static iree_hal_strela_device_t *
-iree_hal_strela_device_cast(iree_hal_device_t* base_value) {
+iree_hal_strela_device_cast(iree_hal_device_t *base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_device_vtable);
   return (iree_hal_strela_device_t *)base_value;
 }

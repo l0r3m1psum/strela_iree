@@ -9,7 +9,13 @@ typedef struct {
 static const iree_hal_allocator_vtable_t iree_hal_strela_allocator_vtable;
 
 static iree_hal_strela_allocator_t *
-iree_hal_strela_allocator_cast(const iree_hal_allocator_t* base_value) {
+iree_hal_strela_allocator_cast(iree_hal_allocator_t *base_value) {
+  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_allocator_vtable);
+  return (iree_hal_strela_allocator_t *)base_value;
+}
+
+static const iree_hal_strela_allocator_t *
+iree_hal_strela_allocator_const_cast(const iree_hal_allocator_t *base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_allocator_vtable);
   return (iree_hal_strela_allocator_t *)base_value;
 }
@@ -63,7 +69,7 @@ static iree_allocator_t
 iree_hal_strela_allocator_host_allocator(
   const iree_hal_allocator_t *base_allocator
 ) {
-  iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
+  const iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_const_cast(base_allocator);
   return allocator->host_allocator;
 }
 
@@ -119,16 +125,6 @@ iree_hal_strela_allocator_query_buffer_compatibility(
   ;
 }
 
-// TODO: this should be implemented in buffer.c I guess...
-void iree_hal_strela_buffer_release_fn(
-  void *user_data, struct iree_hal_buffer_t *base_buffer
-) {
-  strela_dev *dev = user_data;
-  iree_hal_strela_buffer_t *buffer = (iree_hal_strela_buffer_t *)base_buffer;
-
-  strela_buffer_free(dev, buffer->s_buf);
-}
-
 static iree_status_t
 iree_hal_strela_allocator_allocate_buffer(
   iree_hal_allocator_t *base_allocator,
@@ -165,39 +161,27 @@ iree_hal_strela_allocator_allocate_buffer(
     }
   }
 
-  iree_hal_strela_buffer_t *buffer = NULL;
+  iree_hal_buffer_t *buffer = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(
-      allocator->host_allocator, sizeof *buffer, (void **)&buffer
-    );
-  }
-
-  if (iree_status_is_ok(status)) {
-    // TODO: is this the correct way to put stuff in the buffer struct given
-    // that it has to be initialized separately from the rest of the data in the
-    // structure?
-    buffer->host_allocator = allocator->host_allocator;
-    buffer->s_buf = s_buf;
-    buffer->host_ptr = host_ptr;
-    buffer->release_callback = (iree_hal_buffer_release_callback_t){
-      iree_hal_strela_buffer_release_fn, allocator->dev
-    };
-
     iree_hal_memory_type_t actual_type = params->type | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
     iree_hal_memory_access_t actual_access = IREE_HAL_MEMORY_ACCESS_ALL;
     iree_hal_buffer_usage_t actual_usage = params->usage | IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_MAPPING;
 
-    iree_hal_buffer_initialize(
+    status = iree_hal_strela_buffer_wrap(
       iree_hal_buffer_placement_undefined(),
-      (iree_hal_buffer_t *) buffer,
-      allocation_size,
-      0,
-      allocation_size,
       actual_type,
       actual_access,
       actual_usage,
-      &iree_hal_strela_buffer_vtable,
-      &buffer->base
+      allocation_size,
+      /*byte_offset=*/0,
+      allocation_size,
+      s_buf,
+      host_ptr,
+      (iree_hal_buffer_release_callback_t){
+        iree_hal_strela_buffer_release_fn, allocator->dev
+      },
+      allocator->host_allocator,
+      &buffer
     );
   }
 
@@ -206,11 +190,11 @@ iree_hal_strela_allocator_allocate_buffer(
       strela_buffer_free(allocator->dev, s_buf);
     }
     if (buffer) {
-      iree_hal_buffer_release((iree_hal_buffer_t *)buffer);
+      iree_hal_buffer_release(buffer);
     }
   }
 
-  *out_buffer = (iree_hal_buffer_t *)buffer;
+  *out_buffer = buffer;
   return status;
 }
 
