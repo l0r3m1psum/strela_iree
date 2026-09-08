@@ -96,29 +96,36 @@ iree_hal_strela_driver_query_available_devices(
   iree_hal_device_info_t **out_device_infos
 ) {
   printf("%s\n", __func__);
-
   iree_status_t status = iree_ok_status();
+  unsigned strela_count = 0;
+  iree_hal_device_info_t strela_device_infos[1] = {
+    {
+      .device_id = 0,
+      .name = iree_string_view_literal("default_strela"),
+    },
+  };
+  iree_host_size_t device_info_count = 0;
+  iree_hal_device_info_t *device_infos = NULL;
 
-  unsigned count = 0;
-  if (strela_device_count(&count) == -1) {
+  if (strela_device_count(&strela_count) == -1) {
     status = iree_status_from_code(IREE_STATUS_NOT_FOUND);
   }
 
   if (iree_status_is_ok(status)) {
-    // TODO: is count != 0 we should return all the available devices.
-    static const iree_hal_device_info_t device_infos[1] = {
-      {
-        .device_id = 0,
-        .name = iree_string_view_literal("default_strela"),
-      },
-    };
+    // TODO: if strela_count != 0 we should return all the available devices.
     status = iree_allocator_clone(
       host_allocator,
-      iree_make_const_byte_span(device_infos, sizeof device_infos),
-      (void **)out_device_infos
+      iree_make_const_byte_span(strela_device_infos, sizeof strela_device_infos),
+      (void **)&device_infos
     );
-    *out_device_info_count = IREE_ARRAYSIZE(device_infos);
   }
+
+  if (iree_status_is_ok(status)) {
+    device_info_count = IREE_ARRAYSIZE(strela_device_infos);
+  }
+
+  *out_device_info_count = device_info_count;
+  *out_device_infos = device_infos;
 
   return status;
 }
