@@ -21,6 +21,7 @@ iree_hal_strela_semaphore_create(
   iree_allocator_t host_allocator,
   iree_hal_semaphore_t **out_semaphore
 ) {
+  TRACE_FUNC;
   iree_status_t status = iree_ok_status();
   iree_hal_strela_semaphore_t *semaphore = NULL;
   iree_hal_semaphore_t *async_semaphore = NULL;
@@ -59,7 +60,7 @@ iree_hal_strela_semaphore_create(
 
 static void
 iree_hal_strela_async_semaphore_destroy(iree_async_semaphore_t *base_semaphore) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
   iree_allocator_t host_allocator = semaphore->host_allocator;
 
@@ -69,6 +70,7 @@ iree_hal_strela_async_semaphore_destroy(iree_async_semaphore_t *base_semaphore) 
 
 static uint64_t
 iree_hal_strela_async_semaphore_query(iree_async_semaphore_t *base_semaphore) {
+  TRACE_FUNC;
   iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
   return iree_atomic_load(&semaphore->payload_value, iree_memory_order_acquire);
 }
@@ -79,7 +81,8 @@ iree_hal_strela_async_semaphore_signal(
   uint64_t new_value,
   const iree_async_frontier_t *frontier
 ) {
-  printf("%s: signaling to %llu\n", __func__, (unsigned long long)new_value);
+  TRACE_FUNC;
+  printf("signaling to %llu\n", (unsigned long long)new_value);
 
   iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
 
@@ -107,6 +110,7 @@ iree_hal_strela_semaphore_wait(
   iree_timeout_t timeout,
   iree_async_wait_flags_t flags
 ) {
+  TRACE_FUNC;
   iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(base_semaphore);
 
   (void)semaphore;
@@ -121,6 +125,7 @@ iree_hal_strela_semaphore_import_timepoint(
   iree_hal_queue_affinity_t queue_affinity,
   iree_hal_external_timepoint_t external_timepoint
 ) {
+  TRACE_FUNC;
   iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(base_semaphore);
 
   (void)semaphore;
@@ -137,6 +142,7 @@ iree_hal_strela_semaphore_export_timepoint(
   iree_hal_external_timepoint_flags_t requested_flags,
   iree_hal_external_timepoint_t *out_external_timepoint
 ) {
+  TRACE_FUNC;
   iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(base_semaphore);
 
   (void)semaphore;
@@ -149,7 +155,7 @@ iree_hal_strela_async_semaphore_on_fail(
   iree_async_semaphore_t *base_semaphore,
   iree_status_code_t status_code
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_semaphore_t* semaphore = iree_hal_strela_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
   iree_allocator_t host_allocator = semaphore->host_allocator;
 
@@ -161,8 +167,8 @@ static const iree_hal_semaphore_vtable_t
 iree_hal_strela_semaphore_vtable = {
   .async = {
     .destroy = iree_hal_strela_async_semaphore_destroy,
-    .query = iree_hal_strela_async_semaphore_query,
-    .signal = iree_hal_strela_async_semaphore_signal,
+    .query   = iree_hal_strela_async_semaphore_query,
+    .signal  = iree_hal_strela_async_semaphore_signal,
     .on_fail = iree_hal_strela_async_semaphore_on_fail,
   },
   .wait             = iree_hal_strela_semaphore_wait,
