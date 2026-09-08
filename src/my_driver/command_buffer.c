@@ -26,13 +26,15 @@ iree_hal_strela_command_buffer_create(
   iree_hal_strela_command_buffer_t *command_buffer = NULL;
   iree_hal_command_buffer_t *command_buffer_base = NULL;
 
-  iree_host_size_t command_buffer_validation_state_size
-    = iree_hal_command_buffer_validation_state_size(mode, binding_capacity);
-  status = iree_allocator_malloc(
-    host_allocator,
-    sizeof *command_buffer + command_buffer_validation_state_size,
-    (void **)&command_buffer
-  );
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t command_buffer_validation_state_size
+      = iree_hal_command_buffer_validation_state_size(mode, binding_capacity);
+    status = iree_allocator_malloc(
+      host_allocator,
+      sizeof *command_buffer + command_buffer_validation_state_size,
+      (void **)&command_buffer
+    );
+  }
 
   if (iree_status_is_ok(status)) {
     iree_hal_command_buffer_initialize(
@@ -49,8 +51,10 @@ iree_hal_strela_command_buffer_create(
     command_buffer_base = &command_buffer->base;
   }
 
-  if (!iree_status_is_ok(status) && command_buffer_base) {
-    iree_hal_command_buffer_release(command_buffer_base);
+  if (!iree_status_is_ok(status)) {
+    if (command_buffer_base) {
+      iree_hal_command_buffer_release(command_buffer_base);
+    }
   }
 
   *out_command_buffer = command_buffer_base;
