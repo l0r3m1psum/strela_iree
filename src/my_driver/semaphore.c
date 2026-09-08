@@ -25,11 +25,13 @@ iree_hal_strela_semaphore_create(
   iree_status_t status = iree_ok_status();
   iree_hal_strela_semaphore_t *semaphore = NULL;
   iree_hal_semaphore_t *async_semaphore = NULL;
-
   iree_host_size_t frontier_offset = 0, total_size = 0;
-  status = iree_async_semaphore_layout(
-    sizeof *semaphore, 0, &frontier_offset, &total_size
-  );
+
+  if (iree_status_is_ok(status)) {
+    status = iree_async_semaphore_layout(
+      sizeof *semaphore, 0, &frontier_offset, &total_size
+    );
+  }
 
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(
@@ -50,8 +52,10 @@ iree_hal_strela_semaphore_create(
     async_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   }
 
-  if (!iree_status_is_ok(status) && async_semaphore) {
-    iree_hal_semaphore_release(async_semaphore);
+  if (!iree_status_is_ok(status)) {
+    if (async_semaphore) {
+      iree_hal_semaphore_release(async_semaphore);
+    }
   }
 
   *out_semaphore = async_semaphore;

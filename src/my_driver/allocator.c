@@ -27,14 +27,15 @@ iree_hal_strela_allocator_create(
 ) {
   TRACE_FUNC;
   iree_status_t status = iree_ok_status();
-
-    // NOTE: can I reach the device that created this allocator and take it from there?
+  // NOTE: can I reach the device that created this allocator and take it from there?
   strela_dev *dev = strela_dev_init(0);
-  if (!strela_dev_ok(dev)) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION, "Unable to initialize STRELA");
-  }
-
   iree_hal_strela_allocator_t *allocator = NULL;
+
+  if (iree_status_is_ok(status)) {
+    if (!strela_dev_ok(dev)) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION, "Unable to initialize STRELA");
+    }
+  }
 
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(
@@ -50,9 +51,13 @@ iree_hal_strela_allocator_create(
     allocator->dev = dev;
   }
 
-  if (!iree_status_is_ok(status) && allocator) {
-    strela_dev_deinit(allocator->dev);
-    iree_hal_allocator_release((iree_hal_allocator_t *)allocator);
+  if (!iree_status_is_ok(status)) {
+    // TODO: The dev should be owned by the instance of iree_hal_strela_device_t
+    // hence it is wrong to deinit on error here (as it is to initialize it above...)
+    strela_dev_deinit(dev);
+    if (allocator) {
+      iree_hal_allocator_release((iree_hal_allocator_t *)allocator);
+    }
   }
 
   *out_allocator = (iree_hal_allocator_t *)allocator;
@@ -142,21 +147,24 @@ iree_hal_strela_allocator_allocate_buffer(
   TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
   iree_status_t status = iree_ok_status();
-
-  iree_hal_buffer_params_t compat_params = *params;
-  iree_hal_buffer_compatibility_t compatibility =
-    iree_hal_strela_allocator_query_buffer_compatibility(
-      base_allocator, &compat_params, &allocation_size
-  );
-  if (!iree_all_bits_set(compatibility, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE)) {
-    status = iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "allocator cannot allocate a buffer with the given parameters"
-    );
-  }
-
   strela_buffer s_buf = {0};
   void *host_ptr = NULL;
+  iree_hal_buffer_t *buffer = NULL;
+
+  if (iree_status_is_ok(status)) {
+    iree_hal_buffer_params_t compat_params = *params;
+    iree_hal_buffer_compatibility_t compatibility =
+      iree_hal_strela_allocator_query_buffer_compatibility(
+        base_allocator, &compat_params, &allocation_size
+    );
+    if (!iree_all_bits_set(compatibility, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE)) {
+      status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "allocator cannot allocate a buffer with the given parameters"
+      );
+    }
+  }
+
   if (iree_status_is_ok(status)) {
     s_buf = strela_buffer_alloc(allocator->dev, allocation_size);
     if (s_buf.valid) {
@@ -168,7 +176,6 @@ iree_hal_strela_allocator_allocate_buffer(
     }
   }
 
-  iree_hal_buffer_t *buffer = NULL;
   if (iree_status_is_ok(status)) {
     iree_hal_memory_type_t actual_type = params->type | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
     iree_hal_memory_access_t actual_access = IREE_HAL_MEMORY_ACCESS_ALL;

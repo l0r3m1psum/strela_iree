@@ -188,7 +188,7 @@ iree_hal_strela_device_replace_channel_provider(
 static iree_status_t
 iree_hal_strela_device_trim(iree_hal_device_t *base_device) {
   TRACE_FUNC;
-  iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
+  iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
   return iree_hal_allocator_trim(device->device_allocator);
 }
 
@@ -200,7 +200,7 @@ iree_hal_strela_device_query_i64(
   int64_t *out_value
 ) {
   TRACE_FUNC;
-  iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
+  iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
   iree_status_t status = iree_make_status(
     IREE_STATUS_NOT_FOUND,
     "unknown device configuration key value '%.*s :: %.*s'",

@@ -21,6 +21,7 @@ iree_hal_strela_buffer_const_cast(const iree_hal_buffer_t *base_value) {
   return (const iree_hal_strela_buffer_t *)base_value;
 }
 
+// TODO: rename to iree_hal_strela_buffer_create
 static iree_status_t
 iree_hal_strela_buffer_wrap(
   iree_hal_buffer_placement_t placement,
@@ -40,12 +41,14 @@ iree_hal_strela_buffer_wrap(
 ) {
   TRACE_FUNC;
   iree_status_t status = iree_ok_status();
-
   iree_hal_strela_buffer_t* buffer = NULL;
   iree_hal_buffer_t *buffer_base = NULL;
-  status = iree_allocator_malloc(
-    host_allocator, sizeof *buffer, (void **)&buffer
-  );
+
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(
+      host_allocator, sizeof *buffer, (void **)&buffer
+    );
+  }
 
   if (iree_status_is_ok(status)) {
     iree_hal_buffer_initialize(
@@ -67,8 +70,10 @@ iree_hal_strela_buffer_wrap(
     buffer_base = &buffer->base;
   }
 
-  if (!iree_status_is_ok(status) && buffer_base) {
-    iree_hal_buffer_release(buffer_base);
+  if (!iree_status_is_ok(status)) {
+    if (buffer_base) {
+      iree_hal_buffer_release(buffer_base);
+    }
   }
 
   *out_buffer = buffer_base;

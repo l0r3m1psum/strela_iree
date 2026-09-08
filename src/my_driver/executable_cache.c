@@ -21,9 +21,11 @@ iree_hal_strela_executable_cache_create(
   iree_status_t status = iree_ok_status();
   iree_hal_strela_executable_cache_t* executable_cache = NULL;
 
-  status = iree_allocator_malloc(
-    host_allocator, sizeof *executable_cache, (void **)&executable_cache
-  );
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(
+      host_allocator, sizeof *executable_cache, (void **)&executable_cache
+    );
+  }
 
   if (iree_status_is_ok(status)) {
     iree_hal_resource_initialize(

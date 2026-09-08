@@ -24,18 +24,19 @@ iree_hal_strela_driver_factory_try_create(
   TRACE_FUNC;
   iree_status_t status = iree_ok_status();
 
-  if (!iree_string_view_equal(driver_name, IREE_SV("strela"))) {
-    status = iree_make_status(
-      IREE_STATUS_UNAVAILABLE,
-      "no driver '%.*s' is provided by this factory",
-      (int)driver_name.size, driver_name.data
-    );
+  if (iree_status_is_ok(status)) {
+    if (!iree_string_view_equal(driver_name, IREE_SV("strela"))) {
+      status = iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "no driver '%.*s' is provided by this factory",
+        (int)driver_name.size, driver_name.data
+      );
+    }
   }
 
-  iree_hal_strela_driver_options_t options;
-  iree_hal_strela_driver_options_initialize(&options);
-
   if (iree_status_is_ok(status)) {
+    iree_hal_strela_driver_options_t options;
+    iree_hal_strela_driver_options_initialize(&options);
     status = iree_hal_strela_driver_create(
       driver_name, &options, host_allocator, out_driver
     );
