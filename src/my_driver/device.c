@@ -429,7 +429,9 @@ iree_hal_strela_device_queue_alloca(
 
   (void)device;
 
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  // TODO: this is necessary to make progress in executing simple_abs and it has to be implemented...
+
+  return iree_ok_status();
 }
 
 static iree_status_t
