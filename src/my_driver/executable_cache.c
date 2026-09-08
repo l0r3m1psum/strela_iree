@@ -17,6 +17,7 @@ iree_hal_strela_executable_cache_create(
   iree_allocator_t host_allocator,
   iree_hal_executable_cache_t **out_executable_cache
 ) {
+  TRACE_FUNC;
   iree_status_t status = iree_ok_status();
   iree_hal_strela_executable_cache_t* executable_cache = NULL;
 
@@ -44,6 +45,7 @@ iree_hal_strela_executable_cache_create(
 
 static void
 iree_hal_strela_executable_cache_destroy(iree_hal_executable_cache_t *base_executable_cache) {
+  TRACE_FUNC;
   iree_hal_strela_executable_cache_t* executable_cache = iree_hal_strela_executable_cache_cast(base_executable_cache);
   iree_allocator_t host_allocator = executable_cache->host_allocator;
 
@@ -59,6 +61,7 @@ iree_hal_strela_executable_cache_infer_format(
   char *executable_format,
   iree_host_size_t *out_inferred_size
 ) {
+  TRACE_FUNC;
   iree_hal_strela_executable_cache_t* executable_cache = iree_hal_strela_executable_cache_cast(base_executable_cache);
 
   (void)executable_cache;
@@ -72,7 +75,7 @@ iree_hal_strela_executable_cache_can_prepare_format(
   iree_hal_executable_caching_mode_t caching_mode,
   iree_string_view_t executable_format
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_executable_cache_t* executable_cache = iree_hal_strela_executable_cache_cast(base_executable_cache);
 
   (void)executable_cache;
@@ -87,7 +90,7 @@ iree_hal_strela_executable_cache_prepare_executable(
   const iree_hal_executable_params_t *executable_params,
   iree_hal_executable_t **out_executable
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_executable_cache_t* executable_cache = iree_hal_strela_executable_cache_cast(base_executable_cache);
 
   (void)executable_cache;

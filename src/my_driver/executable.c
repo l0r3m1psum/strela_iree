@@ -17,6 +17,7 @@ iree_status_t iree_hal_strela_executable_create(
   iree_allocator_t host_allocator,
   iree_hal_executable_t **out_executable
 ) {
+  TRACE_FUNC;
   iree_status_t status = iree_ok_status();
   iree_hal_strela_executable_t *executable = NULL;
 
@@ -45,6 +46,7 @@ iree_status_t iree_hal_strela_executable_create(
 
 static void
 iree_hal_strela_executable_destroy(iree_hal_executable_t *base_executable) {
+  TRACE_FUNC;
   iree_hal_strela_executable_t *executable = iree_hal_strela_executable_cast(base_executable);
   iree_allocator_t host_allocator = executable->host_allocator;
 
@@ -53,6 +55,7 @@ iree_hal_strela_executable_destroy(iree_hal_executable_t *base_executable) {
 
 static iree_host_size_t
 iree_hal_strela_executable_function_count(iree_hal_executable_t *base_executable) {
+  TRACE_FUNC;
   iree_hal_strela_executable_t *executable = iree_hal_strela_executable_cast(base_executable);
 
   (void)executable;
@@ -66,6 +69,7 @@ iree_hal_strela_executable_function_info(
   iree_hal_executable_function_t function,
   iree_hal_executable_function_info_t *out_info
 ) {
+  TRACE_FUNC;
   iree_hal_strela_executable_t *executable = iree_hal_strela_executable_cast(base_executable);
 
   (void)executable;
@@ -80,6 +84,7 @@ iree_hal_strela_executable_function_parameters(
   iree_host_size_t capacity,
   iree_hal_executable_function_parameter_t* out_parameters
 ) {
+  TRACE_FUNC;
   iree_hal_strela_executable_t *executable = iree_hal_strela_executable_cast(base_executable);
 
   (void)executable;
@@ -93,6 +98,7 @@ iree_hal_strela_executable_lookup_function_by_name(
   iree_string_view_t name,
   iree_hal_executable_function_t *out_function
 ) {
+  TRACE_FUNC;
   printf("%s: looking up kernel '%.*s'\n", __func__, (int)name.size, name.data);
   iree_hal_strela_executable_t *executable = iree_hal_strela_executable_cast(base_executable);
 
@@ -109,6 +115,7 @@ iree_hal_strela_executable_lookup_global_by_name(
   iree_hal_queue_affinity_t queue_affinity,
   iree_hal_buffer_t **out_buffer
 ) {
+  TRACE_FUNC;
   iree_hal_strela_executable_t *executable = iree_hal_strela_executable_cast(base_executable);
 
   (void)executable;

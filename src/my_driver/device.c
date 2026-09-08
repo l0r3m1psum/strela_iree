@@ -63,6 +63,7 @@ iree_hal_strela_device_create(
   iree_allocator_t host_allocator,
   iree_hal_device_t **out_device
 ) {
+  TRACE_FUNC;
   iree_status_t status = iree_ok_status();
   iree_hal_strela_device_t *device = NULL;
   iree_host_size_t total_size = sizeof *device + identifier.size;
@@ -112,6 +113,7 @@ iree_hal_strela_device_create(
 
 static void
 iree_hal_strela_device_clear_topology_info(iree_hal_strela_device_t *device) {
+  TRACE_FUNC;
   if (device->frontier_tracker) {
     iree_async_frontier_tracker_retire_axis(
       device->frontier_tracker, device->axis,
@@ -126,6 +128,7 @@ iree_hal_strela_device_clear_topology_info(iree_hal_strela_device_t *device) {
 
 static void
 iree_hal_strela_device_destroy(iree_hal_device_t *base_device) {
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = (iree_hal_strela_device_t *)base_device;
   iree_allocator_t host_allocator = device->host_allocator;
 
@@ -139,18 +142,21 @@ iree_hal_strela_device_destroy(iree_hal_device_t *base_device) {
 
 static iree_string_view_t
 iree_hal_strela_device_id(iree_hal_device_t *base_device) {
+  TRACE_FUNC;
   iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
   return device->identifier;
 }
 
 static iree_allocator_t
 iree_hal_strela_device_host_allocator(iree_hal_device_t *base_device) {
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
   return device->host_allocator;
 }
 
 static iree_hal_allocator_t *
 iree_hal_strela_device_allocator(iree_hal_device_t *base_device) {
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
   return device->device_allocator;
 }
@@ -160,6 +166,7 @@ iree_hal_strela_device_replace_device_allocator(
   iree_hal_device_t *base_device,
   iree_hal_allocator_t *new_allocator
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
   iree_hal_allocator_retain(new_allocator);
   iree_hal_allocator_release(device->device_allocator);
@@ -171,6 +178,7 @@ iree_hal_strela_device_replace_channel_provider(
   iree_hal_device_t *base_device,
   iree_hal_channel_provider_t *new_provider
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
   iree_hal_channel_provider_retain(new_provider);
   iree_hal_channel_provider_release(device->channel_provider);
@@ -179,6 +187,7 @@ iree_hal_strela_device_replace_channel_provider(
 
 static iree_status_t
 iree_hal_strela_device_trim(iree_hal_device_t *base_device) {
+  TRACE_FUNC;
   iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
   return iree_hal_allocator_trim(device->device_allocator);
 }
@@ -190,6 +199,7 @@ iree_hal_strela_device_query_i64(
   iree_string_view_t key,
   int64_t *out_value
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
   iree_status_t status = iree_make_status(
     IREE_STATUS_NOT_FOUND,
@@ -227,12 +237,14 @@ iree_hal_strela_device_query_capabilities(
   iree_hal_device_t *device,
   iree_hal_device_capabilities_t *out_capabilities
 ) {
+  TRACE_FUNC;
   memset(out_capabilities, 0, sizeof *out_capabilities);
   return iree_ok_status();
 }
 
 static const iree_hal_device_topology_info_t *
 iree_hal_strela_device_topology_info(iree_hal_device_t* base_device) {
+  TRACE_FUNC;
   iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
   return &device->topology_info;
 }
@@ -243,9 +255,7 @@ iree_hal_strela_device_refine_topology_edge(
   iree_hal_device_t *dst_device,
   iree_hal_topology_edge_t *edge
 ) {
-  (void)src_device;
-  (void)dst_device;
-  (void)edge;
+  TRACE_FUNC;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
@@ -254,6 +264,7 @@ iree_hal_strela_device_assign_topology_info(
   iree_hal_device_t *base_device,
   const iree_hal_device_topology_info_t *topology_info
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
   iree_status_t status = iree_ok_status();
 
@@ -286,6 +297,7 @@ iree_hal_strela_device_create_channel(
   iree_hal_channel_params_t params,
   iree_hal_channel_t **out_channel
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
 
   (void)device;
@@ -302,7 +314,7 @@ iree_hal_strela_device_create_command_buffer(
   iree_host_size_t binding_capacity,
   iree_hal_command_buffer_t **out_command_buffer
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
   iree_hal_allocator_t *device_allocator = iree_hal_device_allocator(base_device);
 
@@ -324,6 +336,7 @@ iree_hal_strela_device_create_event(
   iree_hal_event_flags_t flags,
   iree_hal_event_t **out_event
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
 
   (void)device;
@@ -337,6 +350,7 @@ iree_hal_strela_device_create_executable_cache(
   iree_string_view_t identifier,
   iree_hal_executable_cache_t **out_executable_cache
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t* device = iree_hal_strela_device_cast(base_device);
   iree_allocator_t device_host_allocator = iree_hal_device_host_allocator(base_device);
 
@@ -356,6 +370,7 @@ iree_hal_strela_device_import_file(
   iree_hal_external_file_flags_t flags,
   iree_hal_file_t **out_file
 ) {
+  TRACE_FUNC;
   iree_allocator_t device_host_allocator = iree_hal_device_host_allocator(base_device);
   return iree_hal_file_from_handle(
     /*device_allocator=*/NULL,
@@ -376,7 +391,7 @@ iree_hal_strela_device_create_semaphore(
   iree_hal_semaphore_flags_t flags,
   iree_hal_semaphore_t **out_semaphore
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
 
   return iree_hal_strela_semaphore_create(
@@ -394,6 +409,7 @@ iree_hal_strela_device_query_semaphore_compatibility(
   iree_hal_device_t *base_device,
   iree_hal_semaphore_t *semaphore
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
 
   (void)device;
@@ -410,6 +426,7 @@ iree_hal_strela_device_query_queue_pool_backend(
   iree_hal_queue_affinity_t queue_affinity,
   iree_hal_queue_pool_backend_t *out_backend
 ) {
+  TRACE_FUNC;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
@@ -425,6 +442,7 @@ iree_hal_strela_device_queue_alloca(
   iree_hal_alloca_flags_t flags,
   iree_hal_buffer_t **out_buffer
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
 
   (void)device;
@@ -443,6 +461,7 @@ iree_hal_strela_device_queue_dealloca(
   iree_hal_buffer_t *buffer,
   iree_hal_dealloca_flags_t flags
 ) {
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
 
   (void)device;
@@ -463,6 +482,7 @@ iree_hal_strela_device_queue_fill(
   iree_host_size_t pattern_length,
   iree_hal_fill_flags_t flags
 ) {
+  TRACE_FUNC;
   return iree_hal_device_queue_emulated_fill(
     base_device,
     queue_affinity,
@@ -490,6 +510,7 @@ iree_hal_strela_device_queue_update(
   iree_device_size_t length,
   iree_hal_update_flags_t flags
 ) {
+  TRACE_FUNC;
   return iree_hal_device_queue_emulated_update(
     base_device,
     queue_affinity,
@@ -517,6 +538,7 @@ iree_hal_strela_device_queue_copy(
   iree_device_size_t length,
   iree_hal_copy_flags_t flags
 ) {
+  TRACE_FUNC;
   return iree_hal_device_queue_emulated_copy(
     base_device,
     queue_affinity,
@@ -544,6 +566,7 @@ iree_hal_strela_device_queue_read(
   iree_device_size_t length,
   iree_hal_read_flags_t flags
 ) {
+  TRACE_FUNC;
   iree_hal_file_transfer_options_t options = {
     .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
     .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
@@ -576,6 +599,7 @@ iree_hal_strela_device_queue_write(
   iree_device_size_t length,
   iree_hal_write_flags_t flags
 ) {
+  TRACE_FUNC;
   iree_hal_file_transfer_options_t options = {
     .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
     .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
@@ -605,6 +629,7 @@ iree_hal_strela_device_queue_host_call(
   const uint64_t args[4],
   iree_hal_host_call_flags_t flags
 ) {
+  TRACE_FUNC;
   return iree_hal_device_queue_emulated_host_call(
     base_device,
     queue_affinity,
@@ -629,6 +654,7 @@ iree_hal_strela_device_queue_dispatch(
   const iree_hal_buffer_ref_list_t bindings,
   iree_hal_dispatch_flags_t flags
 ) {
+  TRACE_FUNC;
   return iree_hal_device_queue_emulated_dispatch(
     base_device,
     queue_affinity,
@@ -653,8 +679,7 @@ iree_hal_strela_device_queue_execute(
   iree_hal_buffer_binding_table_t buffer_binding_table,
   iree_hal_execute_flags_t execute_flags
 ) {
-  printf("%s\n", __func__);
-
+  TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
 
   (void)device;
@@ -667,6 +692,7 @@ iree_hal_strela_device_queue_flush(
   iree_hal_device_t *base_device,
   iree_hal_queue_affinity_t queue_affinity
 ) {
+  TRACE_FUNC;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
@@ -675,16 +701,19 @@ iree_hal_strela_device_profiling_begin(
   iree_hal_device_t *base_device,
   const iree_hal_device_profiling_options_t *options
 ) {
+  TRACE_FUNC;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 iree_hal_strela_device_profiling_flush(iree_hal_device_t *base_device) {
+  TRACE_FUNC;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 iree_hal_strela_device_profiling_end(iree_hal_device_t *base_device) {
+  TRACE_FUNC;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
@@ -693,11 +722,13 @@ iree_hal_strela_device_external_capture_begin(
   iree_hal_device_t *base_device,
   const iree_hal_device_external_capture_options_t *options
 ) {
+  TRACE_FUNC;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
 static iree_status_t
 iree_hal_strela_device_external_capture_end(iree_hal_device_t *base_device) {
+  TRACE_FUNC;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 

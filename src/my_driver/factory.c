@@ -4,8 +4,7 @@ iree_hal_strela_driver_factory_enumerate(
   iree_host_size_t *out_driver_info_count,
   const iree_hal_driver_info_t **out_driver_infos
 ) {
-  printf("%s\n", __func__);
-
+  TRACE_FUNC;
   static const iree_hal_driver_info_t driver_info = {
     .driver_name = IREE_SVL("strela"),
     .full_name = IREE_SVL("STRELA Accelerator"),
@@ -22,7 +21,7 @@ iree_hal_strela_driver_factory_try_create(
   iree_allocator_t host_allocator,
   iree_hal_driver_t **out_driver
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_status_t status = iree_ok_status();
 
   if (!iree_string_view_equal(driver_name, IREE_SV("strela"))) {
@@ -44,10 +43,3 @@ iree_hal_strela_driver_factory_try_create(
 
   return status;
 }
-
-static const iree_hal_driver_factory_t
-factory = {
-  .self = NULL,
-  .enumerate = iree_hal_strela_driver_factory_enumerate,
-  .try_create = iree_hal_strela_driver_factory_try_create,
-};

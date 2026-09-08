@@ -47,12 +47,14 @@ iree_hal_strela_driver_create(
   iree_allocator_t host_allocator,
   iree_hal_driver_t **out_driver
 ) {
+  TRACE_FUNC;
   iree_status_t status = iree_ok_status();
-
-  status = iree_hal_strela_driver_options_verify(options);
-
   iree_hal_strela_driver_t *driver = NULL;
   iree_host_size_t total_size = sizeof *driver + identifier.size;
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_strela_driver_options_verify(options);
+  }
 
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(host_allocator, total_size, (void **)&driver);
@@ -69,8 +71,10 @@ iree_hal_strela_driver_create(
     memcpy(&driver->options, options, sizeof *options);
   }
 
-  if (!iree_status_is_ok(status) && driver) {
-    iree_hal_driver_release((iree_hal_driver_t *)driver);
+  if (!iree_status_is_ok(status)) {
+    if (driver) {
+      iree_hal_driver_release((iree_hal_driver_t *)driver);
+    }
   }
 
   *out_driver = (iree_hal_driver_t *)driver;
@@ -80,6 +84,7 @@ iree_hal_strela_driver_create(
 
 static void
 iree_hal_strela_driver_destroy(iree_hal_driver_t *base_driver) {
+  TRACE_FUNC;
   iree_hal_strela_driver_t *driver = iree_hal_strela_driver_cast(base_driver);
   iree_allocator_t host_allocator = driver->host_allocator;
 
@@ -95,7 +100,7 @@ iree_hal_strela_driver_query_available_devices(
   iree_host_size_t *out_device_info_count,
   iree_hal_device_info_t **out_device_infos
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_status_t status = iree_ok_status();
   unsigned strela_count = 0;
   iree_hal_device_info_t strela_device_infos[1] = {
@@ -136,7 +141,7 @@ iree_hal_strela_driver_dump_device_info(
   iree_hal_device_id_t device_id,
   iree_string_builder_t *builder
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_driver_t *driver = iree_hal_strela_driver_cast(base_driver);
 
   (void)driver;
@@ -154,7 +159,7 @@ iree_hal_strela_driver_create_device_by_id(
   iree_allocator_t host_allocator,
   iree_hal_device_t **out_device
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_driver_t *driver = iree_hal_strela_driver_cast(base_driver);
 
   iree_hal_strela_device_options_t options;
@@ -178,9 +183,9 @@ iree_hal_strela_driver_create_device_by_path(
   iree_allocator_t host_allocator,
   iree_hal_device_t **out_device
 ) {
+  TRACE_FUNC;
   printf(
-    "%s: \"%.*s\" \"%.*s\"\n",
-    __func__,
+    "\"%.*s\" \"%.*s\"\n",
     (int)driver_name.size, driver_name.data,
     (int)device_path.size, device_path.data
   );

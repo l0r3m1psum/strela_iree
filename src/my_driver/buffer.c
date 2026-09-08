@@ -38,6 +38,7 @@ iree_hal_strela_buffer_wrap(
   iree_allocator_t host_allocator,
   iree_hal_buffer_t **out_buffer
 ) {
+  TRACE_FUNC;
   iree_status_t status = iree_ok_status();
 
   iree_hal_strela_buffer_t* buffer = NULL;
@@ -76,7 +77,7 @@ iree_hal_strela_buffer_wrap(
 
 static void
 iree_hal_strela_buffer_destroy(iree_hal_buffer_t *base_buffer) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_buffer_t* buffer = iree_hal_strela_buffer_cast(base_buffer);
   iree_allocator_t host_allocator = buffer->host_allocator;
 
@@ -97,7 +98,7 @@ iree_hal_strela_buffer_map_range(
   iree_device_size_t local_byte_length,
   iree_hal_buffer_mapping_t *mapping
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
 
   iree_status_t status = iree_ok_status();
   iree_hal_strela_buffer_t *buffer = iree_hal_strela_buffer_cast(base_buffer);
@@ -133,7 +134,7 @@ iree_hal_strela_buffer_unmap_range(
   iree_device_size_t local_byte_length,
   iree_hal_buffer_mapping_t *mapping
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   return iree_ok_status();
 }
 
@@ -143,6 +144,7 @@ iree_hal_strela_buffer_invalidate_range(
   iree_device_size_t local_byte_offset,
   iree_device_size_t local_byte_length
 ) {
+  TRACE_FUNC;
   // TODO: here cache invalidation
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
@@ -153,6 +155,7 @@ iree_hal_strela_buffer_flush_range(
   iree_device_size_t local_byte_offset,
   iree_device_size_t local_byte_length
 ) {
+  TRACE_FUNC;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 

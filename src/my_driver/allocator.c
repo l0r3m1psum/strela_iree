@@ -25,6 +25,7 @@ iree_hal_strela_allocator_create(
   iree_allocator_t host_allocator,
   iree_hal_allocator_t **out_allocator
 ) {
+  TRACE_FUNC;
   iree_status_t status = iree_ok_status();
 
     // NOTE: can I reach the device that created this allocator and take it from there?
@@ -61,6 +62,7 @@ iree_hal_strela_allocator_create(
 
 static void
 iree_hal_strela_allocator_destroy(iree_hal_allocator_t *base_allocator) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
   iree_allocator_free(allocator->host_allocator, allocator);
 }
@@ -69,12 +71,14 @@ static iree_allocator_t
 iree_hal_strela_allocator_host_allocator(
   const iree_hal_allocator_t *base_allocator
 ) {
+  TRACE_FUNC;
   const iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_const_cast(base_allocator);
   return allocator->host_allocator;
 }
 
 static iree_status_t
 iree_hal_strela_allocator_trim(iree_hal_allocator_t *base_allocator) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -87,6 +91,7 @@ iree_hal_strela_allocator_query_statistics(
   iree_hal_allocator_t *base_allocator,
   iree_hal_allocator_statistics_t *out_statistics
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
   memcpy(out_statistics, &allocator->statistics, sizeof *out_statistics);
 }
@@ -98,6 +103,7 @@ iree_hal_strela_allocator_query_memory_heaps(
   iree_hal_allocator_memory_heap_t *heaps,
   iree_host_size_t *out_count
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -111,6 +117,7 @@ iree_hal_strela_allocator_query_buffer_compatibility(
   iree_hal_buffer_params_t *params,
   iree_device_size_t *allocation_size
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -132,7 +139,7 @@ iree_hal_strela_allocator_allocate_buffer(
   iree_device_size_t allocation_size,
   iree_hal_buffer_t **out_buffer
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
   iree_status_t status = iree_ok_status();
 
@@ -203,6 +210,7 @@ iree_hal_strela_allocator_deallocate_buffer(
   iree_hal_allocator_t *base_allocator,
   iree_hal_buffer_t *base_buffer
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -218,6 +226,7 @@ iree_hal_strela_allocator_import_buffer(
   iree_hal_buffer_release_callback_t release_callback,
   iree_hal_buffer_t **out_buffer
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -233,6 +242,7 @@ iree_hal_strela_allocator_export_buffer(
   iree_hal_external_buffer_flags_t requested_flags,
   iree_hal_external_buffer_t *out_external_buffer
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -244,7 +254,7 @@ static bool
 iree_hal_strela_allocator_supports_virtual_memory(
   iree_hal_allocator_t *base_allocator
 ) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -259,6 +269,7 @@ iree_hal_strela_allocator_virtual_memory_query_granularity(
   iree_device_size_t *IREE_RESTRICT out_minimum_page_size,
   iree_device_size_t *IREE_RESTRICT out_recommended_page_size
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -276,6 +287,7 @@ iree_hal_strela_allocator_virtual_memory_reserve(
   iree_device_size_t size,
   iree_hal_buffer_t **out_virtual_buffer
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -289,6 +301,7 @@ iree_hal_strela_allocator_virtual_memory_release(
   iree_hal_allocator_t *base_allocator,
   iree_hal_buffer_t *virtual_buffer
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -304,6 +317,7 @@ iree_hal_strela_allocator_physical_memory_allocate(
   iree_allocator_t host_allocator,
   iree_hal_physical_memory_t **out_physical_memory
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -317,6 +331,7 @@ iree_hal_strela_allocator_physical_memory_free(
   iree_hal_allocator_t *base_allocator,
   iree_hal_physical_memory_t *physical_memory
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -333,6 +348,7 @@ iree_hal_strela_allocator_virtual_memory_map(
   iree_device_size_t physical_offset,
   iree_device_size_t size
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -347,6 +363,7 @@ iree_hal_strela_allocator_virtual_memory_unmap(
   iree_device_size_t virtual_offset,
   iree_device_size_t size
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -363,6 +380,7 @@ iree_hal_strela_allocator_virtual_memory_protect(
   iree_hal_queue_affinity_t queue_affinity,
   iree_hal_memory_protection_t protection
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;
@@ -378,6 +396,7 @@ iree_hal_strela_allocator_virtual_memory_advise(
   iree_hal_queue_affinity_t queue_affinity,
   iree_hal_memory_advice_t advice
 ) {
+  TRACE_FUNC;
   iree_hal_strela_allocator_t *allocator = iree_hal_strela_allocator_cast(base_allocator);
 
   (void)allocator;

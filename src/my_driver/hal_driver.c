@@ -11,6 +11,8 @@ is_all_zero(const void *ptr, size_t size) {
   return buf[0] == 0 && memcmp(buf, buf + 1, size - 1) == 0;
 }
 
+#define TRACE_FUNC do { printf("%s\n", __func__); } while(0)
+
 #include "buffer.c"
 #include "allocator.c"
 #include "command_buffer.c"
@@ -23,7 +25,13 @@ is_all_zero(const void *ptr, size_t size) {
 
 IREE_API_EXPORT iree_status_t
 iree_hal_my_driver_module_register(iree_hal_driver_registry_t *registry) {
-  printf("%s\n", __func__);
+  TRACE_FUNC;
+
+  iree_hal_driver_factory_t factory = {
+    .self = NULL,
+    .enumerate = iree_hal_strela_driver_factory_enumerate,
+    .try_create = iree_hal_strela_driver_factory_try_create,
+  };
 
   return iree_hal_driver_registry_register_factory(registry, &factory);
 }
