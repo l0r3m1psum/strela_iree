@@ -1,7 +1,9 @@
+#include "iree/hal/utils/deferred_work_queue.h"
+
 typedef struct iree_hal_strela_semaphore_t {
   iree_async_semaphore_t async;
   iree_allocator_t host_allocator;
-  iree_atomic_int64_t payload_value;
+  iree_hal_deferred_work_queue_t* work_queue;
 } iree_hal_strela_semaphore_t;
 
 static const iree_hal_semaphore_vtable_t iree_hal_strela_semaphore_vtable;
@@ -12,12 +14,19 @@ iree_hal_strela_semaphore_cast(iree_hal_semaphore_t *base_value) {
   return (iree_hal_strela_semaphore_t *)base_value;
 }
 
+static iree_async_semaphore_t *
+iree_hal_async_semaphore_cast(iree_hal_semaphore_t *base_value) {
+  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_strela_semaphore_vtable);
+  return (iree_async_semaphore_t *)base_value;
+}
+
 static iree_status_t
 iree_hal_strela_semaphore_create(
   iree_async_proactor_t *proactor,
   iree_hal_queue_affinity_t queue_affinity,
   uint64_t initial_value,
   iree_hal_semaphore_flags_t flags,
+  iree_hal_deferred_work_queue_t *work_queue,
   iree_allocator_t host_allocator,
   iree_hal_semaphore_t **out_semaphore
 ) {
@@ -49,6 +58,7 @@ iree_hal_strela_semaphore_create(
       &semaphore->async
     );
     semaphore->host_allocator = host_allocator;
+    semaphore->work_queue = work_queue;
     async_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   }
 
@@ -65,7 +75,9 @@ iree_hal_strela_semaphore_create(
 static void
 iree_hal_strela_async_semaphore_destroy(iree_async_semaphore_t *base_semaphore) {
   TRACE_FUNC;
-  iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
+  iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(
+    iree_hal_semaphore_cast(base_semaphore)
+  );
   iree_allocator_t host_allocator = semaphore->host_allocator;
 
   iree_async_semaphore_deinitialize(&semaphore->async);
@@ -75,8 +87,19 @@ iree_hal_strela_async_semaphore_destroy(iree_async_semaphore_t *base_semaphore) 
 static uint64_t
 iree_hal_strela_async_semaphore_query(iree_async_semaphore_t *base_semaphore) {
   TRACE_FUNC;
-  iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
-  return iree_atomic_load(&semaphore->payload_value, iree_memory_order_acquire);
+  iree_status_t failure = (iree_status_t)iree_atomic_load(
+      &base_semaphore->failure_status, iree_memory_order_acquire
+  );
+  uint64_t value = 0;
+
+  if (!iree_status_is_ok(failure)) {
+    value = iree_hal_status_as_semaphore_failure(failure);
+  } else {
+    value = (uint64_t)iree_atomic_load(&base_semaphore->timeline_value,
+                                       iree_memory_order_acquire);
+  }
+
+  return value;
 }
 
 static iree_status_t
@@ -86,25 +109,46 @@ iree_hal_strela_async_semaphore_signal(
   const iree_async_frontier_t *frontier
 ) {
   TRACE_FUNC;
-  printf("signaling to %llu\n", (unsigned long long)new_value);
+  iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(
+    iree_hal_semaphore_cast(base_semaphore)
+  );
+  iree_status_t status = iree_ok_status();
 
-  iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
+  if (iree_status_is_ok(status)) {
+    status = iree_async_semaphore_advance_timeline(
+      base_semaphore, new_value, frontier
+    );
+  }
 
-  // 1. Advance the simulated host-side tracking value.
-  iree_atomic_store(&semaphore->payload_value, new_value, iree_memory_order_release);
+  if (iree_status_is_ok(status)) {
+    iree_async_semaphore_dispatch_timepoints(base_semaphore, new_value);
+#if 0
+  // TODO: write a class that implements the work_queue interface
+    status = iree_hal_deferred_work_queue_issue(semaphore->work_queue);
+#else
+    (void)semaphore;
+#endif
+  }
 
-  // 2. Notify the hardware (if you had a real device-side timeline semaphore).
-  // iree_hal_strela_hw_signal_semaphore(..., new_value);
+  return status;
+}
 
-  iree_async_semaphore_advance_timeline(base_semaphore, new_value, frontier);
+static void
+iree_hal_strela_async_semaphore_on_fail(
+  iree_async_semaphore_t *base_semaphore,
+  iree_status_code_t status_code
+) {
+  TRACE_FUNC;
+  iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(
+    iree_hal_semaphore_cast(base_semaphore)
+  );
 
-  // 3. Wake up the async proactor.
-  // Note: Depending on your exact IREE revision, the base `iree_async_semaphore_t`
-  // might automatically resolve waiting nodes when this vtable hook returns `OK`,
-  // or you might need to explicitly call a proactor wake-up function like:
-  // iree_async_semaphore_advance(base_semaphore, new_value, frontier);
-
-  return iree_ok_status();
+#if 0
+  // TODO: write a class that implements the work_queue interface
+  iree_status_ignore(iree_hal_deferred_work_queue_issue(semaphore->work_queue));
+#else
+  (void)semaphore;
+#endif
 }
 
 static iree_status_t
@@ -115,11 +159,16 @@ iree_hal_strela_semaphore_wait(
   iree_async_wait_flags_t flags
 ) {
   TRACE_FUNC;
-  iree_hal_strela_semaphore_t *semaphore = iree_hal_strela_semaphore_cast(base_semaphore);
-
-  (void)semaphore;
-
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  iree_async_semaphore_t *async_semaphore = iree_hal_async_semaphore_cast(base_semaphore);
+  return iree_async_semaphore_multi_wait(
+    IREE_ASYNC_WAIT_MODE_ALL,
+    &async_semaphore,
+    &value,
+    /*count=*/1,
+    timeout,
+    flags,
+    iree_allocator_system()
+  );
 }
 
 static iree_status_t
@@ -152,19 +201,6 @@ iree_hal_strela_semaphore_export_timepoint(
   (void)semaphore;
 
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
-}
-
-static void
-iree_hal_strela_async_semaphore_on_fail(
-  iree_async_semaphore_t *base_semaphore,
-  iree_status_code_t status_code
-) {
-  TRACE_FUNC;
-  iree_hal_strela_semaphore_t* semaphore = iree_hal_strela_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
-  iree_allocator_t host_allocator = semaphore->host_allocator;
-
-  iree_async_semaphore_deinitialize(&semaphore->async);
-  iree_allocator_free(host_allocator, semaphore);
 }
 
 static const iree_hal_semaphore_vtable_t

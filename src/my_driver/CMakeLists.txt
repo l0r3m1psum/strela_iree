@@ -14,9 +14,10 @@ iree_cc_library(
     "hal_driver.c"
   DEPS
     iree::hal
+    iree::hal::utils::deferred_work_queue
+    iree::hal::utils::file_transfer
     iree::hal::utils::queue_emulation
     iree::hal::utils::queue_host_call_emulation
-    iree::hal::utils::file_transfer
     strela
   PUBLIC
 )

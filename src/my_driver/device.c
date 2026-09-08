@@ -394,11 +394,14 @@ iree_hal_strela_device_create_semaphore(
   TRACE_FUNC;
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
 
+  // TODO: implement this...
+  iree_hal_deferred_work_queue_t *work_queue = NULL;
   return iree_hal_strela_semaphore_create(
     device->proactor,
     queue_affinity,
     initial_value,
     flags,
+    work_queue,
     device->host_allocator,
     out_semaphore
   );
@@ -443,13 +446,48 @@ iree_hal_strela_device_queue_alloca(
   iree_hal_buffer_t **out_buffer
 ) {
   TRACE_FUNC;
+  iree_status_t status = iree_ok_status();
   iree_hal_strela_device_t *device = iree_hal_strela_device_cast(base_device);
+  iree_hal_allocator_t *device_allocator = iree_hal_device_allocator(base_device);
+  iree_hal_buffer_t *buffer = NULL;
 
-  (void)device;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_list_wait(
+      wait_semaphore_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE
+    );
+  }
 
-  // TODO: this is necessary to make progress in executing simple_abs and it has to be implemented...
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_allocator_allocate_buffer(
+      device_allocator, params, allocation_size, &buffer
+    );
+  }
 
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_list_signal(
+      signal_semaphore_list, /*frontier=*/NULL
+    );
+  }
+
+  if (iree_status_is_ok(status)) {
+    (void)device;
+    // TODO: does this apply to STRELA?
+    // iree_hal_cuda_device_advance_frontier(device);
+  } else {
+    iree_hal_semaphore_list_fail(
+      signal_semaphore_list, iree_status_clone(status)
+    );
+  }
+
+  if (!iree_status_is_ok(status)) {
+    if (buffer) {
+      iree_hal_buffer_release(buffer);
+    }
+  }
+
+  *out_buffer = buffer;
+
+  return status;
 }
 
 static iree_status_t
