@@ -12,7 +12,9 @@ module {
       dilation = array<i64: 1, 1>,
       pad = array<i64: 0, 0, 0, 0>,
       stride = array<i64: 1, 1>
-    } : (tensor<?x1x1x9xi8>, tensor<9x1x1x9xi8>, tensor<9xi32>, tensor<1xi8>, tensor<1xi8>) -> tensor<?x1x1x9xi32>
+    } : (
+      tensor<?x1x1x9xi8>, tensor<9x1x1x9xi8>, tensor<9xi32>, tensor<1xi8>, tensor<1xi8>
+    ) -> tensor<?x1x1x9xi32>
 
     return %output : tensor<?x1x1x9xi32>
   }
