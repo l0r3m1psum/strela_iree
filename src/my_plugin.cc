@@ -16,6 +16,25 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
+#include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/OpImplementation.h"
+
+#include "StrelaDialect.h.inc"
+#define GET_OP_CLASSES
+#include "StrelaOps.h.inc"
+#define GET_OP_CLASSES
+#include "StrelaOps.cpp.inc"
+#include "StrelaDialect.cpp.inc"
+
+namespace mlir::strela {
+  void StrelaDialect::initialize() {
+    addOperations<
+#define GET_OP_LIST
+#include "StrelaOps.cpp.inc"
+    >();
+  }
+}
+
 using namespace mlir;
 using namespace mlir::iree_compiler;
 
