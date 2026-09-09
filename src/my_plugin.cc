@@ -19,6 +19,18 @@
 using namespace mlir;
 using namespace mlir::iree_compiler;
 
+static void
+print(mlir::ModuleOp moduleOp) {
+  mlir::OpPrintingFlags flags;
+  flags.elideLargeElementsAttrs(16);
+  moduleOp.print(llvm::errs(), flags);
+}
+
+static void
+print(mlir::func::FuncOp funcOp) {
+  print(funcOp->getParentOfType<ModuleOp>());
+}
+
 namespace mlir::iree_compiler {
 
 // TODO: make enumeration for opcodes...
@@ -478,10 +490,6 @@ struct MyFusionPass : public PassWrapper<MyFusionPass, OperationPass<func::FuncO
     if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
       signalPassFailure();
     }
-
-    mlir::OpPrintingFlags flags;
-    flags.elideLargeElementsAttrs(16);
-    funcOp->getParentOfType<ModuleOp>().print(llvm::errs(), flags);
   }
 };
 
@@ -636,10 +644,6 @@ struct MyRewritePass : public PassWrapper<MyRewritePass, OperationPass<func::Fun
     if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
       signalPassFailure();
     }
-
-    mlir::OpPrintingFlags flags;
-    flags.elideLargeElementsAttrs(16);
-    funcOp->getParentOfType<ModuleOp>().print(llvm::errs(), flags);
   }
 };
 
