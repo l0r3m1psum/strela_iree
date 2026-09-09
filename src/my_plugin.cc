@@ -10,6 +10,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tosa/IR/TosaOps.h"
@@ -38,17 +39,119 @@ namespace mlir::strela {
 using namespace mlir;
 using namespace mlir::iree_compiler;
 
+static std::mutex printMutex;
+
 static void
 print(mlir::ModuleOp moduleOp) {
+  std::lock_guard<std::mutex> lock(printMutex);
   mlir::OpPrintingFlags flags;
   flags.elideLargeElementsAttrs(16);
   moduleOp.print(llvm::errs(), flags);
+  llvm::errs() << '\n';
 }
 
 static void
 print(mlir::func::FuncOp funcOp) {
   print(funcOp->getParentOfType<ModuleOp>());
 }
+
+// TODO: constrain STRELA IO to int32.
+struct ConvertLinalgAddToStrela : public OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+
+  LogicalResult
+  matchAndRewrite(
+    linalg::GenericOp genericOp, PatternRewriter &rewriter
+  ) const override {
+    if (genericOp.getNumDpsInputs() != 2 || genericOp.getNumDpsInits() != 1) {
+      return failure();
+    }
+    if (!genericOp.hasPureTensorSemantics()) return failure();
+
+    if (!llvm::all_of(genericOp.getIteratorTypesArray(), linalg::isParallelIterator)) {
+      return failure();
+    }
+
+    Block *body = genericOp.getBlock();
+    if (std::distance(body->begin(), body->end()) != 2) return failure();
+
+    Operation &innerOp = body->front();
+    if (!isa<arith::AddIOp>(innerOp)) {
+      return failure();
+    }
+
+    assert(isa<linalg::YieldOp>(body->back()));
+
+    rewriter.replaceOpWithNewOp<strela::AddOp>(
+      genericOp,
+      genericOp.getResultTypes(),
+      genericOp.getDpsInputs()[0],
+      genericOp.getDpsInputs()[1]
+    );
+
+    return success();
+  }
+};
+
+struct ConvertLinalgReluToStrela : public OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(linalg::GenericOp genericOp, PatternRewriter &rewriter) const override {
+    if (genericOp.getNumDpsInputs() != 1 || genericOp.getNumDpsInits() != 1) {
+      return failure();
+    }
+    if (!genericOp.hasPureTensorSemantics()) return failure();
+
+    if (!llvm::all_of(genericOp.getIteratorTypesArray(), linalg::isParallelIterator)) {
+      return failure();
+    }
+
+    Block *body = genericOp.getBlock();
+    if (std::distance(body->begin(), body->end()) != 3) return failure();
+
+    // TODO: check for the presence of constant 0
+
+    auto maxOp = dyn_cast<arith::MaxSIOp>(std::next(body->begin()));
+    if (!maxOp) return failure();
+
+    assert(isa<linalg::YieldOp>(body->back()));
+
+    rewriter.replaceOpWithNewOp<strela::ReluOp>(
+      genericOp,
+      genericOp.getResultTypes(),
+      genericOp.getDpsInputs()[0]
+    );
+
+    return success();
+  }
+};
+
+struct LinalgToStrelaPass
+    : public PassWrapper<LinalgToStrelaPass, OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LinalgToStrelaPass)
+
+  StringRef getArgument() const override { return "iree-strela-convert-linalg"; }
+  StringRef getDescription() const override { return "Converts linalg ops to strela backend ops"; }
+
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<strela::StrelaDialect>();
+  }
+
+  void runOnOperation() override {
+    func::FuncOp funcOp = getOperation();
+    MLIRContext *context = &getContext();
+
+    RewritePatternSet patterns(context);
+    patterns.add<ConvertLinalgAddToStrela, ConvertLinalgReluToStrela>(context);
+
+    GreedyRewriteConfig config;
+    if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
+      signalPassFailure();
+    }
+
+    print(funcOp);
+  }
+};
 
 namespace mlir::iree_compiler {
 
@@ -65,7 +168,11 @@ struct StrelaTargetBackend : public IREE::HAL::TargetBackend {
     IREE::HAL::ExecutableTargetAttr exectutableTargetAttr,
     OpPassManager &passManager
   ) override {
-    // Here we should convert linalg to the strela dialect...
+    OpPassManager &modulePassManager = passManager.nest<ModuleOp>();
+
+    modulePassManager.addNestedPass<func::FuncOp>(
+      std::make_unique<LinalgToStrelaPass>()
+    );
   }
 
   // TODO: how does this relate to StrelaTargetDevice::getDefaultDeviceTarget?
@@ -656,8 +763,7 @@ struct MyRewritePass : public PassWrapper<MyRewritePass, OperationPass<func::Fun
     llvm::errs() << "DEBUG: MyRewritePass is running on operation: "
                << funcOp.getName() << "\n";
     RewritePatternSet patterns(context);
-    patterns.add<DoubleRoundRewriter>(context);
-    patterns.add<DynamicBatchRewriter>(context);
+    patterns.add<DoubleRoundRewriter, DynamicBatchRewriter>(context);
 
     GreedyRewriteConfig config;
     if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
@@ -670,31 +776,36 @@ struct MyOptions {
   bool enable_fusion = false;
   void bindOptions(OptionsBinder& binder) {
     static llvm::cl::OptionCategory category("IREE Example 2 Plugin");
-    binder.opt<bool>("iree-example2-fusion", enable_fusion,
-                     llvm::cl::desc("Enable the custom centered-gemm microkernel fusion"),
-                     llvm::cl::cat(category));
+    binder.opt<bool>(
+      "iree-example2-fusion",
+      enable_fusion,
+      llvm::cl::desc("Enable the custom centered-gemm microkernel fusion"),
+      llvm::cl::cat(category)
+    );
   }
 };
 
 struct MySession : public PluginSession<MySession, MyOptions> {
 
-  void extendInputConversionPreprocessingPassPipeline(
-    OpPassManager &passManager,
-    InputDialectOptions::Type inputType
+  void
+  onRegisterDialects(DialectRegistry &registry) override {
+    registry.insert<strela::StrelaDialect>();
+  }
+
+  void
+  extendInputConversionPreprocessingPassPipeline(
+    OpPassManager &passManager, InputDialectOptions::Type inputType
   ) override {
     passManager.addNestedPass<func::FuncOp>(std::make_unique<MyRewritePass>());
   }
 
-  bool extendCustomInputConversionPassPipeline(
-    OpPassManager& pm,
-    std::string_view typeMnemonic
+  bool
+  extendCustomInputConversionPassPipeline(
+    OpPassManager& passManager, std::string_view typeMnemonic
   ) override {
-      llvm::errs()
-        << "Custom input conversion pass pipeline type: "
-        << typeMnemonic << "\n";
       bool extensionsWereMade = false;
       if (options.enable_fusion) {
-        pm.addNestedPass<func::FuncOp>(std::make_unique<MyFusionPass>());
+        passManager.addNestedPass<func::FuncOp>(std::make_unique<MyFusionPass>());
         extensionsWereMade = true;
       }
       return extensionsWereMade;
@@ -725,8 +836,10 @@ struct MySession : public PluginSession<MySession, MyOptions> {
 
 IREE_DEFINE_COMPILER_OPTION_FLAGS(MyOptions);
 
-extern "C" bool iree_register_compiler_plugin_example2(
-    mlir::iree_compiler::PluginRegistrar* registrar) {
+extern "C" bool
+iree_register_compiler_plugin_example2(
+  mlir::iree_compiler::PluginRegistrar *registrar
+) {
   registrar->registerPlugin<MySession>("example2");
   return true;
 }
