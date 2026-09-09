@@ -36,8 +36,39 @@ namespace mlir::strela {
   }
 }
 
-using namespace mlir;
-using namespace mlir::iree_compiler;
+/*
+ * +--+--+--+--+
+ * | 0| 1| 2| 3|
+ * +--+--+--+--+
+ * | 4| 5| 6| 7|
+ * +--+--+--+--+
+ * | 8| 9|10|11|
+ * +--+--+--+--+
+ * |12|13|14|15|
+ * +--+--+--+--+
+ */
+// Constants are -1=0xFFFFFFFF and delays are set to 0xDDEE
+static const std::array<uint32_t, 5*4*4> centered_matmul_kernel {
+  0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
+  0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
+  0x00000041, 0x02000000, 0x00000000, 0x00000000, 0x00000000, // 4
+  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 0
+
+  0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 13
+  0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 9
+  0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 5
+  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 1
+
+  0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 14
+  0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 10
+  0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 6
+  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 2
+
+  0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 15
+  0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 11
+  0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 7
+  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 3
+};
 
 static std::mutex printMutex;
 
@@ -52,8 +83,13 @@ print(mlir::ModuleOp moduleOp) {
 
 static void
 print(mlir::func::FuncOp funcOp) {
-  print(funcOp->getParentOfType<ModuleOp>());
+  print(funcOp->getParentOfType<mlir::ModuleOp>());
 }
+
+using namespace mlir;
+using namespace mlir::iree_compiler;
+
+// TODO: implement loop fission for this two patterns.
 
 // TODO: constrain STRELA IO to int32.
 struct ConvertLinalgAddToStrela : public OpRewritePattern<linalg::GenericOp> {
@@ -155,11 +191,6 @@ struct LinalgToStrelaPass
 
 namespace mlir::iree_compiler {
 
-// TODO: make enumeration for opcodes...
-struct StrelaExecutableHeader {
-  uint32_t opcode; // e.g., 1 for ABS, 2 for MATMUL
-};
-
 struct StrelaTargetBackend : public IREE::HAL::TargetBackend {
 
   std::string getLegacyDefaultDeviceID() const override { return "strela"; }
@@ -203,31 +234,32 @@ struct StrelaTargetBackend : public IREE::HAL::TargetBackend {
     mlir::ModuleOp innerModule = variantOp.getInnerModule();
     if (innerModule) {
       innerModule.walk([&detected_opcode](Operation *op) {
-        llvm::StringRef opName = op->getName().getStringRef();
-        // TODO: add support for ReLU
-        // TODO: all operations should be on 32 bit integers.
-        if (opName == "math.absi" || opName == "math.absf") {
-          llvm::errs() << "ABS detected\n";
-          detected_opcode = 1; // 1 = ABS
+        if (isa<strela::AddOp>(op)) {
+          detected_opcode = 1; // e.g. 1 = ADD
+        } else if (isa<strela::ReluOp>(op)) {
+          detected_opcode = 2; // e.g. 2 = RELU
         }
       });
     }
 
-    StrelaExecutableHeader header;
-    header.opcode = detected_opcode;
+    if (detected_opcode != 0) {
+      const uint8_t* byte_ptr = reinterpret_cast<const uint8_t *>(centered_matmul_kernel.data());
+      std::vector<uint8_t> binary_payload(byte_ptr, byte_ptr + sizeof centered_matmul_kernel);
 
-    std::vector<uint8_t> binary_payload(sizeof header);
-    std::memcpy(binary_payload.data(), &header, sizeof header);
+      IREE::HAL::ExecutableBinaryOp::create(
+        executableBuilder,
+        variantOp.getLoc(),
+        variantOp.getSymNameAttr(),         // Inherit the symbol name ("strela")
+        variantOp.getTarget().getFormat(),  // Inherit the format ("custom")
+        binary_payload
+      );
+      return success();
+    } else {
+      // FIXME: when this is reached compilation fails. Region computable by
+      // STRELA should be created with stream.affinity
+      return failure();
+    }
 
-    IREE::HAL::ExecutableBinaryOp::create(
-      executableBuilder,
-      variantOp.getLoc(),
-      variantOp.getSymNameAttr(),         // Inherit the symbol name ("strela")
-      variantOp.getTarget().getFormat(),  // Inherit the format ("custom")
-      binary_payload
-    );
-
-    return success();
   }
 };
 
@@ -283,40 +315,6 @@ struct StrelaTargetDevice : public IREE::HAL::TargetDevice {
 } // namespace mlir::iree_compiler
 
 namespace {
-
-/*
- * +--+--+--+--+
- * | 0| 1| 2| 3|
- * +--+--+--+--+
- * | 4| 5| 6| 7|
- * +--+--+--+--+
- * | 8| 9|10|11|
- * +--+--+--+--+
- * |12|13|14|15|
- * +--+--+--+--+
- */
-// Constants are -1=0xFFFFFFFF and delays are set to 0xDDEE
-static const std::array<uint32_t, 5*4*4> centered_matmul_kernel {
-  0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
-  0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
-  0x00000041, 0x02000000, 0x00000000, 0x00000000, 0x00000000, // 4
-  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 0
-
-  0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 13
-  0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 9
-  0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 5
-  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 1
-
-  0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 14
-  0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 10
-  0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 6
-  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 2
-
-  0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 15
-  0x00000201, 0xC0040400, 0xDDEE0080, 0x00000000, 0x00000000, // 11
-  0x08800109, 0x003C0340, 0x00000082, 0x00000000, 0x00000000, // 7
-  0x00000201, 0x020C0300, 0x00000081, 0x00000000, 0xFFFFFFFF, // 3
-};
 
 struct Conv2DMatmulAnalysis {
   int32_t z_x_val;
@@ -788,11 +786,6 @@ struct MyOptions {
 struct MySession : public PluginSession<MySession, MyOptions> {
 
   void
-  onRegisterDialects(DialectRegistry &registry) override {
-    registry.insert<strela::StrelaDialect>();
-  }
-
-  void
   extendInputConversionPreprocessingPassPipeline(
     OpPassManager &passManager, InputDialectOptions::Type inputType
   ) override {
@@ -809,6 +802,11 @@ struct MySession : public PluginSession<MySession, MyOptions> {
         extensionsWereMade = true;
       }
       return extensionsWereMade;
+  }
+
+  void
+  onRegisterDialects(DialectRegistry &registry) override {
+    registry.insert<strela::StrelaDialect>();
   }
 
   void
