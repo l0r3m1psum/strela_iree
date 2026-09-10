@@ -86,12 +86,114 @@ print(mlir::func::FuncOp funcOp) {
   print(funcOp->getParentOfType<mlir::ModuleOp>());
 }
 
+static mlir::LogicalResult
+allInputsInteger32(mlir::linalg::GenericOp genericOp) {
+  for (mlir::Value input : genericOp.getDpsInputs()) {
+    auto inputType = mlir::dyn_cast<mlir::RankedTensorType>(input.getType());
+    if (!inputType || !inputType.getElementType().isInteger(32)) {
+      return mlir::failure();
+    }
+  }
+  return mlir::success();
+}
+
+static mlir::LogicalResult
+isStrelaLinalgAdd(mlir::linalg::GenericOp genericOp) {
+  if (genericOp.getNumDpsInputs() != 2 || genericOp.getNumDpsInits() != 1) {
+    return mlir::failure();
+  }
+
+  if (failed(allInputsInteger32(genericOp))) {
+    return mlir::failure();
+  }
+
+  if (!genericOp.hasPureTensorSemantics()) {
+    return mlir::failure();
+  }
+
+  if (!llvm::all_of(genericOp.getIteratorTypesArray(), mlir::linalg::isParallelIterator)) {
+    return mlir::failure();
+  }
+
+  mlir::Block *body = genericOp.getBlock();
+  if (std::distance(body->begin(), body->end()) != 2) {
+    return mlir::failure();
+  }
+
+  auto addOp = mlir::dyn_cast<mlir::arith::AddIOp>(&body->front());
+  if (!addOp) {
+    return mlir::failure();
+  }
+
+  auto yieldOp = mlir::dyn_cast<mlir::linalg::YieldOp>(body->back());
+  if (!yieldOp || yieldOp.getNumOperands() != 1 || yieldOp.getOperand(0) != addOp.getResult()) {
+    return mlir::failure();
+  }
+
+  return mlir::success();
+}
+
+static mlir::LogicalResult
+isStrelaLinalgRelu(mlir::linalg::GenericOp genericOp) {
+  if (genericOp.getNumDpsInputs() != 1 || genericOp.getNumDpsInits() != 1) {
+    return mlir::failure();
+  }
+
+  if (failed(allInputsInteger32(genericOp))) {
+    return mlir::failure();
+  }
+
+  if (!genericOp.hasPureTensorSemantics()) {
+    return mlir::failure();
+  }
+
+  if (!llvm::all_of(genericOp.getIteratorTypesArray(), mlir::linalg::isParallelIterator)) {
+    return mlir::failure();
+  }
+
+  mlir::Block *body = genericOp.getBlock();
+  if (std::distance(body->begin(), body->end()) != 3) {
+    return mlir::failure();
+  }
+
+  auto constOp = mlir::dyn_cast<mlir::arith::ConstantOp>(&body->front());
+  if (!constOp) {
+    return mlir::failure();
+  } else {
+    auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constOp.getValue());
+    if (!intAttr || intAttr.getInt() != 0) {
+      return mlir::failure();
+    }
+  }
+
+  auto maxOp = mlir::dyn_cast<mlir::arith::MaxSIOp>(std::next(body->begin()));
+  if (!maxOp) {
+    return mlir::failure();
+  }
+
+  {
+    mlir::Value inputElem = body->getArgument(0);
+    mlir::Value zeroVal = constOp.getResult();
+    bool isReluOperands = (maxOp.getLhs() == inputElem && maxOp.getRhs() == zeroVal) ||
+                          (maxOp.getLhs() == zeroVal && maxOp.getRhs() == inputElem);
+    if (!isReluOperands) {
+      return mlir::failure();
+    }
+  }
+
+  auto yieldOp = mlir::dyn_cast<mlir::linalg::YieldOp>(body->back());
+  if (!yieldOp || yieldOp.getNumOperands() != 1 || yieldOp.getOperand(0) != maxOp.getResult()) {
+    return mlir::failure();
+  }
+
+  return mlir::success();
+}
+
 using namespace mlir;
 using namespace mlir::iree_compiler;
 
 // TODO: implement loop fission for this two patterns.
 
-// TODO: constrain STRELA IO to int32.
 struct ConvertLinalgAddToStrela : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
@@ -99,66 +201,39 @@ struct ConvertLinalgAddToStrela : public OpRewritePattern<linalg::GenericOp> {
   matchAndRewrite(
     linalg::GenericOp genericOp, PatternRewriter &rewriter
   ) const override {
-    if (genericOp.getNumDpsInputs() != 2 || genericOp.getNumDpsInits() != 1) {
-      return failure();
-    }
-    if (!genericOp.hasPureTensorSemantics()) return failure();
+    LogicalResult result = isStrelaLinalgAdd(genericOp);
 
-    if (!llvm::all_of(genericOp.getIteratorTypesArray(), linalg::isParallelIterator)) {
-      return failure();
-    }
-
-    Block *body = genericOp.getBlock();
-    if (std::distance(body->begin(), body->end()) != 2) return failure();
-
-    Operation &innerOp = body->front();
-    if (!isa<arith::AddIOp>(innerOp)) {
-      return failure();
+    if (succeeded(result)) {
+      rewriter.replaceOpWithNewOp<strela::AddOp>(
+        genericOp,
+        genericOp.getResultTypes(),
+        genericOp.getDpsInputs()[0],
+        genericOp.getDpsInputs()[1]
+      );
     }
 
-    assert(isa<linalg::YieldOp>(body->back()));
-
-    rewriter.replaceOpWithNewOp<strela::AddOp>(
-      genericOp,
-      genericOp.getResultTypes(),
-      genericOp.getDpsInputs()[0],
-      genericOp.getDpsInputs()[1]
-    );
-
-    return success();
+    return result;
   }
 };
 
 struct ConvertLinalgReluToStrela : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(linalg::GenericOp genericOp, PatternRewriter &rewriter) const override {
-    if (genericOp.getNumDpsInputs() != 1 || genericOp.getNumDpsInits() != 1) {
-      return failure();
+  LogicalResult
+  matchAndRewrite(
+    linalg::GenericOp genericOp, PatternRewriter &rewriter
+  ) const override {
+    LogicalResult result = isStrelaLinalgRelu(genericOp);
+
+    if (succeeded(result)) {
+      rewriter.replaceOpWithNewOp<strela::ReluOp>(
+        genericOp,
+        genericOp.getResultTypes(),
+        genericOp.getDpsInputs()[0]
+      );
     }
-    if (!genericOp.hasPureTensorSemantics()) return failure();
 
-    if (!llvm::all_of(genericOp.getIteratorTypesArray(), linalg::isParallelIterator)) {
-      return failure();
-    }
-
-    Block *body = genericOp.getBlock();
-    if (std::distance(body->begin(), body->end()) != 3) return failure();
-
-    // TODO: check for the presence of constant 0
-
-    auto maxOp = dyn_cast<arith::MaxSIOp>(std::next(body->begin()));
-    if (!maxOp) return failure();
-
-    assert(isa<linalg::YieldOp>(body->back()));
-
-    rewriter.replaceOpWithNewOp<strela::ReluOp>(
-      genericOp,
-      genericOp.getResultTypes(),
-      genericOp.getDpsInputs()[0]
-    );
-
-    return success();
+    return result;
   }
 };
 
@@ -167,7 +242,9 @@ struct LinalgToStrelaPass
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LinalgToStrelaPass)
 
   StringRef getArgument() const override { return "iree-strela-convert-linalg"; }
-  StringRef getDescription() const override { return "Converts linalg ops to strela backend ops"; }
+  StringRef getDescription() const override {
+    return "Converts linalg ops to strela backend ops";
+  }
 
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<strela::StrelaDialect>();
