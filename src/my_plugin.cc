@@ -1,5 +1,6 @@
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenDialect.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenOps.h"
+#include "iree/compiler/Dialect/Flow/IR/FlowOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetBackend.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetDevice.h"
@@ -187,6 +188,19 @@ isStrelaLinalgRelu(mlir::linalg::GenericOp genericOp) {
   }
 
   return mlir::success();
+}
+
+static bool
+isSupportedByStrela(mlir::linalg::GenericOp genericOp) {
+  if (mlir::succeeded(isStrelaLinalgAdd(genericOp))) {
+    return true;
+  }
+
+  if (mlir::succeeded(isStrelaLinalgRelu(genericOp))) {
+    return true;
+  }
+
+  return false;
 }
 
 using namespace mlir;
@@ -847,14 +861,89 @@ struct MyRewritePass : public PassWrapper<MyRewritePass, OperationPass<func::Fun
   }
 };
 
+// Multi-Device Heterogeneous Partitioning
+struct FormStrelaDispatchesPass
+    : public PassWrapper<FormStrelaDispatchesPass, OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(FormStrelaDispatchesPass)
+
+  StringRef getArgument() const override { return "iree-form-strela-dispatches"; }
+  StringRef getDescription() const override {
+    return "Isolates STRELA supported operations into explicit flow dispatch regions";
+  }
+
+  void runOnOperation() override {
+    func::FuncOp funcOp = getOperation();
+    MLIRContext *context = &getContext();
+    OpBuilder builder(context);
+
+    auto strelaAffinity = IREE::HAL::DeviceAffinityAttr::get(
+      context, SymbolRefAttr::get(context, "strela"), /*queue_mask=*/0
+    );
+
+    print(funcOp);
+
+    funcOp.walk([&](linalg::GenericOp genericOp) {
+      if (!isSupportedByStrela(genericOp)) return;
+      llvm::errs() << "A dispatchRegion should be created\n";
+
+      builder.setInsertionPoint(genericOp);
+      Location loc = genericOp.getLoc();
+
+      SmallVector<Value> result_dims;
+      for (Value res : genericOp.getResults()) {
+        auto tensorType = dyn_cast<RankedTensorType>(res.getType());
+        if (!tensorType) continue;
+        for (int64_t dim = 0; dim < tensorType.getRank(); ++dim) {
+          if (tensorType.isDynamicDim(dim)) {
+            Value dimIdx = arith::ConstantIndexOp::create(builder, loc, dim);
+            Value dimVal = tensor::DimOp::create(builder, loc, genericOp.getDpsInits()[0], dimIdx);
+            result_dims.push_back(dimVal);
+          }
+        }
+      }
+
+      auto dispatchRegion = IREE::Flow::DispatchRegionOp::create(
+        builder,
+        loc,
+        genericOp.getResultTypes(),
+        result_dims,
+        /*workload=*/ValueRange{}
+      );
+
+      dispatchRegion->setAttr("flow.affinity", strelaAffinity);
+
+      // Move the operation inside the dispatch region
+      Block *body = builder.createBlock(&dispatchRegion.getBody());
+      builder.setInsertionPointToStart(body);
+
+      Operation *clonedOp = builder.clone(*genericOp);
+      IREE::Flow::ReturnOp::create(builder, loc, clonedOp->getResults());
+
+      // Replace outside uses with the dispatch results
+      genericOp.replaceAllUsesWith(dispatchRegion.getResults());
+      genericOp.erase();
+    });
+
+    print(funcOp);
+  }
+
+};
+
 struct MyOptions {
   bool enable_fusion = false;
+  bool partition = false;
   void bindOptions(OptionsBinder& binder) {
-    static llvm::cl::OptionCategory category("IREE Example 2 Plugin");
+    static llvm::cl::OptionCategory category("IREE STRELA Plugin");
     binder.opt<bool>(
       "iree-example2-fusion",
       enable_fusion,
-      llvm::cl::desc("Enable the custom centered-gemm microkernel fusion"),
+      llvm::cl::desc("Enable the custom centered-gemm fusion"),
+      llvm::cl::cat(category)
+    );
+    binder.opt<bool>(
+      "iree-strela-partition",
+      partition,
+      llvm::cl::desc("Enable the partition of supported operations by STRELA from the CPU ones"),
       llvm::cl::cat(category)
     );
   }
@@ -876,6 +965,10 @@ struct MySession : public PluginSession<MySession, MyOptions> {
       bool extensionsWereMade = false;
       if (options.enable_fusion) {
         passManager.addNestedPass<func::FuncOp>(std::make_unique<MyFusionPass>());
+        extensionsWereMade = true;
+      }
+      if (options.partition) {
+        passManager.addNestedPass<func::FuncOp>(std::make_unique<FormStrelaDispatchesPass>());
         extensionsWereMade = true;
       }
       return extensionsWereMade;
