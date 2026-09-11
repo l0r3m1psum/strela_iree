@@ -49,3 +49,22 @@ do
 		"${stem}.mlir" -o "${stem}.vmfb" >/dev/null 2>&1
 done
 IFS=$old_ifs
+
+# --compile-to={preprocessing,flow,executable-targets,hal} are interesting
+iree-compile --iree-plugin=example2 \
+	--iree-strela-partition \
+	--iree-hal-target-device=cpu=local \
+	--iree-hal-local-target-device-backends=llvm-cpu \
+	--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf \
+	--iree-hal-target-device=strela=strela \
+	--iree-hal-default-device=cpu \
+	 --compile-to=hal \
+	strela_test.mlir
+
+iree-compile --iree-plugin=example2 \
+	--iree-strela-partition \
+	--iree-hal-target-device=vulkan=vulkan \
+	--iree-hal-target-device=strela=strela \
+	--iree-hal-default-device=vulkan \
+	 --compile-to=executable-targets \
+	strela_test.mlir
