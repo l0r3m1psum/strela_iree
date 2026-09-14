@@ -15,9 +15,9 @@ is_all_zero(const void *ptr, size_t size) {
 
 #include "buffer.c"
 #include "allocator.c"
+#include "executable.c"
 #include "command_buffer.c"
 #include "semaphore.c"
-#include "executable.c"
 #include "executable_cache.c"
 #include "device.c"
 #include "driver.c"

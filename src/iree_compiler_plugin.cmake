@@ -29,6 +29,7 @@ iree_cc_library(
     MLIRLinalgDialect
     iree::compiler::PluginAPI
     iree::compiler::Codegen::Dialect::Codegen::IR::IREECodegenDialect
+    iree::compiler::Dialect::TensorExt::IR
   PUBLIC
 )
 
