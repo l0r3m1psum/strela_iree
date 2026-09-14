@@ -1,0 +1,20 @@
+iree_cc_library(
+  NAME
+    TosaTransforms
+  HDRS
+    "Passes.h"
+  SRCS
+    "NormalizeRescalePass.cpp"
+  DEPS
+    iree::..::..::src::strela::defs
+    MLIRArithDialect
+    MLIRFuncDialect
+    MLIRIR
+    MLIRPass
+    MLIRSupport
+    MLIRSCFDialect
+    MLIRTensorDialect
+    MLIRTosaDialect
+    MLIRTransforms
+  PUBLIC
+)

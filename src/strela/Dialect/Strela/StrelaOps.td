@@ -1,19 +1,9 @@
-#ifndef STRELA_OPS
-#define STRELA_OPS
+#ifndef STRELA_DIALECT_STRELA_STRELAOPS
+#define STRELA_DIALECT_STRELA_STRELAOPS
 
-include "mlir/Interfaces/FunctionInterfaces.td"
-include "mlir/Interfaces/InferTypeOpInterface.td"
-include "mlir/Interfaces/SideEffectInterfaces.td"
-include "mlir/IR/OpBase.td"
-include "mlir/IR/SymbolInterfaces.td"
-
-def Strela_Dialect : Dialect {
-  let name = "strela";
-  let cppNamespace = "::mlir::strela";
-}
-
-class Strela_Op<string mnemonic, list<Trait> traits = []> :
-    Op<Strela_Dialect, mnemonic, traits>;
+include "StrelaBase.td"
+include "mlir/Interfaces/InferTypeOpInterface.td"  // SameOperandsAndResultType
+include "mlir/Interfaces/SideEffectInterfaces.td"  // Pure
 
 def AddOp : Strela_Op<"add", [Pure, SameOperandsAndResultType]> {
   let summary = "element-wise addition operation";
@@ -92,4 +82,4 @@ def BindingStoreOp : Strela_BindingOp<"binding_store"> {
   let hasVerifier = 1;
 }
 
-#endif // STRELA_OPS
+#endif // STRELA_DIALECT_STRELA_STRELAOPS

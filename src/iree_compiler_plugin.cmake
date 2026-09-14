@@ -1,40 +1,31 @@
-set(LLVM_TARGET_DEFINITIONS "${CMAKE_CURRENT_LIST_DIR}/StrelaOps.td")
+# This file is include()d from a generated CMakeLists.txt under
+# ${IREE_BINARY_DIR}/compiler/plugins, so CMAKE_CURRENT_SOURCE_DIR points there
+# rather than at these sources. Use CMAKE_CURRENT_LIST_DIR for source paths and
+# give add_subdirectory() an explicit binary directory.
+add_subdirectory(
+  "${CMAKE_CURRENT_LIST_DIR}/strela"
+  "${CMAKE_CURRENT_BINARY_DIR}/strela"
+)
 
-set(TD_INCLUDES "")
-foreach(dir IN LISTS MLIR_INCLUDE_DIRS)
-  list(APPEND TD_INCLUDES "-I${dir}")
-endforeach()
-
-mlir_tablegen(StrelaOps.h.inc -gen-op-decls ${TD_INCLUDES})
-mlir_tablegen(StrelaOps.cpp.inc -gen-op-defs ${TD_INCLUDES})
-
-mlir_tablegen(StrelaDialect.h.inc -gen-dialect-decls ${TD_INCLUDES})
-mlir_tablegen(StrelaDialect.cpp.inc -gen-dialect-defs ${TD_INCLUDES})
-
-add_public_tablegen_target(StrelaOpsIncGen)
-
+# Nothing but the plugin session: options, the pass pipelines it installs, and
+# the HAL target registration.
 iree_cc_library(
   NAME
     registration2
   SRCS
-    "${CMAKE_CURRENT_LIST_DIR}/my_plugin.cc"
-  INCLUDES
-    "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_LIST_DIR}/PluginRegistration.cpp"
   DEPS
+    iree::..::..::src::strela::defs
+    iree::..::..::src::strela::Dialect::Strela::StrelaDialect
+    iree::..::..::src::strela::Target::StrelaTarget
+    iree::..::..::src::strela::Transforms::Linalg::LinalgTransforms
+    iree::..::..::src::strela::Transforms::Tosa::TosaTransforms
+    iree::compiler::PluginAPI
+    MLIRFuncDialect
     MLIRIR
     MLIRPass
-    MLIRTransforms
-    MLIRFuncDialect
-    MLIRTosaDialect
-    MLIRLinalgDialect
-    iree::compiler::PluginAPI
-    iree::compiler::Codegen::Dialect::Codegen::IR::IREECodegenDialect
-    iree::compiler::Dialect::TensorExt::IR
   PUBLIC
 )
-
-iree_package_name(_PACKAGE_NAME)
-add_dependencies(${_PACKAGE_NAME}_registration2 StrelaOpsIncGen)
 
 iree_compiler_register_plugin(
   PLUGIN_ID
