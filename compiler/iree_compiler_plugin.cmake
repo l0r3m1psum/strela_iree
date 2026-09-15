@@ -34,3 +34,11 @@ iree_compiler_register_plugin(
   TARGET
     ::registration
 )
+
+# The lit tests drive iree-compile/iree-opt with --iree-plugin=estela, so they
+# belong to the compiler plugin rather than the runtime one. iree_lit_test_suite
+# is a no-op when IREE_BUILD_TESTS is off, which is what the ARM build uses.
+add_subdirectory(
+  "${CMAKE_CURRENT_LIST_DIR}/../tests"
+  "${CMAKE_CURRENT_BINARY_DIR}/tests"
+)
