@@ -38,10 +38,15 @@ struct StrelaBinding {
   // Index into the dispatch binding list, i.e. the hal.pipeline.layout ordinal.
   uint32_t binding = 0;
   // Push constant ordinals holding the low and high halves of the subspan byte
-  // offset, or empty when that offset is a compile-time zero. The two are not
+  // offset, set only when that offset varies per dispatch site. The two are not
   // necessarily adjacent: IREE dedupes the constant loads, so two bindings whose
   // offsets share a low word also share that ordinal.
   std::optional<std::pair<uint32_t, uint32_t>> offsets;
+  // The subspan byte offset when it is known at compile time and non-zero,
+  // which is what FuseDispatchBindings leaves behind after packing several
+  // operands into one buffer.
+  std::optional<uint64_t> staticByteOffset;
+  // Both empty means the subspan starts at byte zero. They are never both set.
 };
 
 // `util.assume.int` forwards its operands unchanged; look through it so the
@@ -54,9 +59,10 @@ lookThroughAssume(Value value) {
   return value;
 }
 
-// Recognizes the two forms a `hal.interface.binding.subspan` byte offset takes
-// in an executable source and reports where the driver can find it:
+// Recognizes the three forms a `hal.interface.binding.subspan` byte offset
+// takes in an executable source and reports where the driver can find it:
 //   * absent or a literal zero                       -> offset is zero
+//   * any other literal                              -> that constant offset
 //   * index_castui(ori(extui(load LO),
 //                      shli(extui(load HI), 32)))    -> ordinals LO and HI
 // Anything else we cannot describe to the driver, so serialization fails rather
@@ -66,29 +72,35 @@ lookThroughAssume(Value value) {
 // a dispatch where two offsets share a low word they also share that ordinal
 // and the pair is not adjacent.
 // Appended to every diagnostic that comes from failing to read a subspan byte
-// offset. Those offsets are only dynamic because Stream's FuseDispatchBindings
-// merges bindings and folds the per-dispatch-site offsets into push constants;
-// with that pass off they are all literal zeros and the pattern below is never
-// exercised. Naming the flag in the message keeps a network that hits an offset
-// shape we do not recognize a one-flag fix rather than a compiler change.
+// offset. Offsets are non-zero at all only because Stream's FuseDispatchBindings
+// merges bindings and either folds the per-dispatch-site offset into a constant
+// or passes it in push constants; with that pass off they are all literal zeros
+// and the patterns below are never exercised. Naming the flag in the message
+// keeps a network that hits an offset shape we do not recognize a one-flag fix
+// rather than a compiler change.
 static constexpr const char *strelaUnfusedBindingsHint =
   "; retry with --iree-scheduling-optimize-bindings=false, which stops "
   "FuseDispatchBindings from folding per-dispatch-site offsets into push "
   "constants and leaves every subspan offset a literal zero";
 
-// On success `offsets` is left empty for a compile-time zero and otherwise holds
-// the (low, high) push constant ordinals.
+// On success exactly one of `binding.offsets` and `binding.staticByteOffset` is
+// set, or neither when the offset is a compile-time zero.
 static LogicalResult
-matchBindingOffset(Value byteOffset,
-                   std::optional<std::pair<uint32_t, uint32_t>> &offsets) {
+matchBindingOffset(Value byteOffset, StrelaBinding &binding) {
+  auto &offsets = binding.offsets;
   offsets.reset();
+  binding.staticByteOffset.reset();
   if (!byteOffset) return success();
 
   byteOffset = lookThroughAssume(byteOffset);
 
   llvm::APInt literal;
   if (matchPattern(byteOffset, m_ConstantInt(&literal))) {
-    return success(literal.isZero());
+    // A constant offset needs nothing from the host at dispatch time: the
+    // driver can fold it into the base address when it binds the buffer.
+    if (literal.isNegative() || literal.getActiveBits() > 64) return failure();
+    if (!literal.isZero()) binding.staticByteOffset = literal.getZExtValue();
+    return success();
   }
 
   auto castOp = byteOffset.getDefiningOp<arith::IndexCastUIOp>();
@@ -140,7 +152,7 @@ matchBinding(Value dispatchTensor) {
 
   StrelaBinding binding;
   binding.binding = static_cast<uint32_t>(subspanOp.getBinding().getZExtValue());
-  if (failed(matchBindingOffset(subspanOp.getByteOffset(), binding.offsets))) {
+  if (failed(matchBindingOffset(subspanOp.getByteOffset(), binding))) {
     return std::nullopt;
   }
   return binding;
@@ -274,10 +286,16 @@ struct StrelaMaterializeBindingsPass
     if (failed(info)) return signalPassFailure();
 
     OpBuilder builder(info->kernelOp);
-    auto offsetsAttrOf = [&](const StrelaBinding &binding) {
+    auto offsetsAttrOf = [&builder](const StrelaBinding &binding) {
       if (!binding.offsets) return DenseI64ArrayAttr();
       return builder.getDenseI64ArrayAttr(
         {binding.offsets->first, binding.offsets->second}
+      );
+    };
+    auto byteOffsetAttrOf = [&builder](const StrelaBinding &binding) {
+      if (!binding.staticByteOffset) return IntegerAttr();
+      return builder.getI64IntegerAttr(
+        static_cast<int64_t>(*binding.staticByteOffset)
       );
     };
 
@@ -287,7 +305,8 @@ struct StrelaMaterializeBindingsPass
       Operation *loadOp = info->operandOps[index];
       auto bindingLoadOp = strela::BindingLoadOp::create(
         builder, loadOp->getLoc(), loadOp->getResult(0).getType(),
-        static_cast<int64_t>(binding.binding), offsetsAttrOf(binding)
+        static_cast<int64_t>(binding.binding), offsetsAttrOf(binding),
+        byteOffsetAttrOf(binding)
       );
       info->kernelOp->setOperand(index, bindingLoadOp.getResult());
     }
@@ -296,7 +315,8 @@ struct StrelaMaterializeBindingsPass
     builder.setInsertionPointAfter(info->kernelOp);
     strela::BindingStoreOp::create(
       builder, info->resultOp->getLoc(), info->kernelOp->getResult(0),
-      static_cast<int64_t>(info->result.binding), offsetsAttrOf(info->result)
+      static_cast<int64_t>(info->result.binding), offsetsAttrOf(info->result),
+      byteOffsetAttrOf(info->result)
     );
     info->resultOp->erase();
 

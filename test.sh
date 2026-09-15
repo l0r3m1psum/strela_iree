@@ -88,5 +88,6 @@ iree-compile strela_test_transfer.mlir \
 --iree-execution-model=async-external \
 --iree-hal-target-device=device_a=local[0] \
 --iree-hal-target-device=device_b=strela \
+--iree-hal-default-device=device_a \
 --iree-hal-local-target-device-backends=vmvx \
---compile-to=stream
+--compile-to=executable-targets

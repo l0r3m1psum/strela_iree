@@ -1,31 +1,49 @@
-module {
+// hal.device.promise<@name> are supposed to be set with --iree-hal-target-device=name=device
+//
+// TODO: look intoi this!
+// Shapes are static on purpose: with tensor<?x9xi32> the TOSA lowering of
+// tosa.add emits a runtime "is this dim 1?" broadcast check as its own
+// dispatch, which is placed on device_b and has no STRELA equivalent.
+module attributes {
+  stream.topology = #hal.device.topology<links = [
+    (@device_a -> @device_b = {unified_memory = true, transparent_access = true}),
+    (@device_b -> @device_a = {unified_memory = true, transparent_access = true})
+  ]>
+} {
   func.func @main(
-    %i0: tensor<?x9xi32> {iree.abi.affinity = #hal.device.promise<@device_a>},
-    %i1: tensor<?x9xi32> {iree.abi.affinity = #hal.device.promise<@device_a>},
-    %i2: tensor<?x9xi32> {iree.abi.affinity = #hal.device.promise<@device_a>},
-    %i3: tensor<?x9xi32> {iree.abi.affinity = #hal.device.promise<@device_a>}
+    %i0: tensor<8x9xi32> {iree.abi.affinity = #hal.device.promise<@device_a>},
+    %i1: tensor<8x9xi32> {iree.abi.affinity = #hal.device.promise<@device_a>},
+    %i2: tensor<8x9xi32> {iree.abi.affinity = #hal.device.promise<@device_a>},
+    %i3: tensor<8x9xi32> {iree.abi.affinity = #hal.device.promise<@device_a>}
   ) -> (i32 {iree.abi.affinity = #hal.device.promise<@device_a>}) {
     %zero = "tosa.const"() { values = dense<0> : tensor<1x1xi32> } : () -> tensor<1x1xi32>
     %c0 = arith.constant 0 : index
     %new_shape = tosa.const_shape {values = dense<[-1]> : tensor<1xindex>} : () -> !tosa.shape<1>
 
-    %d2 = tensor.dim %i2, %c0 : tensor<?x9xi32>
-    %d3 = tensor.dim %i3, %c0 : tensor<?x9xi32>
-    %i2_b = flow.tensor.transfer %i2 : tensor<?x9xi32>{%d2} to #hal.device.promise<@device_b>
-    %i3_b = flow.tensor.transfer %i3 : tensor<?x9xi32>{%d3} to #hal.device.promise<@device_b>
+    %i2_b = flow.tensor.transfer %i2 : tensor<8x9xi32> to #hal.device.promise<@device_b>
+    %i3_b = flow.tensor.transfer %i3 : tensor<8x9xi32> to #hal.device.promise<@device_b>
 
-    %a0 = "tosa.add"(%i0, %i1) : (tensor<?x9xi32>, tensor<?x9xi32>) -> tensor<?x9xi32>
-    %a1_b = "tosa.add"(%i2_b, %i3_b) : (tensor<?x9xi32>, tensor<?x9xi32>) -> tensor<?x9xi32>
-    %r0 = tosa.maximum %a0, %zero : (tensor<?x9xi32>, tensor<1x1xi32>) -> tensor<?x9xi32>
-    %r1_b = tosa.maximum %a1_b, %zero : (tensor<?x9xi32>, tensor<1x1xi32>) -> tensor<?x9xi32>
+    %a0 = "tosa.add"(%i0, %i1) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
+    %a1_b = "tosa.add"(%i2_b, %i3_b) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
 
-    %dr = tensor.dim %r1_b, %c0 : tensor<?x9xi32>
-    %r1 = flow.tensor.transfer %r1_b : tensor<?x9xi32>{%dr} to #hal.device.promise<@device_a>
+    // DispatchCreation's fusion passes will not cross an optimization barrier,
+    // so each op keeps its own dispatch. Unlike a same-device
+    // flow.tensor.transfer this costs nothing: it survives to Stream as a
+    // barrier on a !stream.resource<transient> and introduces no
+    // stream.cmd.copy.
+    %a1_barrier = util.optimization_barrier %a1_b : tensor<8x9xi32>
 
-    %a2 = "tosa.add"(%r0, %r1) : (tensor<?x9xi32>, tensor<?x9xi32>) -> tensor<?x9xi32>
+    %r0 = tosa.maximum %a0, %zero : (tensor<8x9xi32>, tensor<1x1xi32>) -> tensor<8x9xi32>
+    %r1_b = tosa.maximum %a1_barrier, %zero : (tensor<8x9xi32>, tensor<1x1xi32>) -> tensor<8x9xi32>
 
-    %flattened = tosa.reshape %a2, %new_shape : (tensor<?x9xi32>, !tosa.shape<1>) -> tensor<?xi32>
-    %min_tensor = tosa.reduce_min %flattened {axis = 0 : i32} : (tensor<?xi32>) -> tensor<1xi32>
+    // No barrier needed here: the transfer back to device_a is already a
+    // fusion boundary, as is the transfer of %i2/%i3 above.
+    %r1 = flow.tensor.transfer %r1_b : tensor<8x9xi32> to #hal.device.promise<@device_a>
+
+    %a2 = "tosa.add"(%r0, %r1) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
+
+    %flattened = tosa.reshape %a2, %new_shape : (tensor<8x9xi32>, !tosa.shape<1>) -> tensor<72xi32>
+    %min_tensor = tosa.reduce_min %flattened {axis = 0 : i32} : (tensor<72xi32>) -> tensor<1xi32>
     %min_scalar = tensor.extract %min_tensor[%c0] : tensor<1xi32>
     return %min_scalar : i32
   }
