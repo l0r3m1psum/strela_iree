@@ -1,0 +1,17 @@
+iree_cc_library(
+  NAME
+    Utils
+  HDRS
+    "Bitstreams.h"
+    "KernelMatchers.h"
+  SRCS
+    "KernelMatchers.cpp"
+  DEPS
+    iree::..::..::compiler::src::estela::defs
+    MLIRArithDialect
+    MLIRIR
+    MLIRLinalgDialect
+    MLIRLinalgUtils
+    MLIRSupport
+  PUBLIC
+)

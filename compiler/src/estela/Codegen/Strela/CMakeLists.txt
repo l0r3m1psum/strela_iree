@@ -1,0 +1,22 @@
+iree_cc_library(
+  NAME
+    StrelaTarget
+  HDRS
+    "StrelaTarget.h"
+  SRCS
+    "StrelaTarget.cpp"
+  DEPS
+    iree::..::..::compiler::src::estela::defs
+    iree::..::..::compiler::src::estela::Dialect::Strela::Conversion::StrelaConversion
+    iree::..::..::compiler::src::estela::Dialect::Strela::IR::IR
+    iree::..::..::compiler::src::estela::Dialect::Strela::Transforms::StrelaTransforms
+    iree::..::..::compiler::src::estela::Utils::Utils
+    iree::compiler::Dialect::HAL::IR
+    iree::compiler::Dialect::HAL::Target
+    iree::compiler::Dialect::Stream::IR
+    MLIRFuncDialect
+    MLIRIR
+    MLIRPass
+    MLIRSupport
+  PUBLIC
+)

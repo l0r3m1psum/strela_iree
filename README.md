@@ -1,3 +1,5 @@
+# Estela a compiler for [STRELA](https://arxiv.org/abs/2404.12503)
+
 Remember to download the bitstream, driver and library to the FPGA!
 
 It may be necessary to append ` -- -l $(($(nproc) / 2))` to the `cmake --build`

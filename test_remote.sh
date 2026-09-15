@@ -23,21 +23,21 @@ iree-compile \
 	3rdparty/iree/samples/models/simple_abs.mlir -o simple_abs_armv7a.vmfb
 
 iree-compile \
-	--iree-plugin=example2 \
+	--iree-plugin=estela \
 	--iree-hal-target-device=local \
 	--iree-hal-local-target-device-backends=vmvx \
 	ad01_int8.mlir -o ad01_int8_vmx.vmfb
 
 iree-compile \
-	--iree-plugin=example2 \
+	--iree-plugin=estela \
 	--iree-hal-target-backends=llvm-cpu \
 	--iree-llvmcpu-link-embedded=false \
 	$pynq_flags \
 	ad01_int8.mlir -o ad01_int8_armv7a.vmfb
 
 iree-compile \
-	--iree-plugin=example2 \
-	--iree-example2-fusion \
+	--iree-plugin=estela \
+	--iree-estela-fusion \
 	--iree-hal-target-backends=llvm-cpu \
 	--iree-llvmcpu-link-embedded=false \
 	$pynq_flags \
@@ -50,15 +50,15 @@ iree-compile \
 	matmul.mlir -o matmul_armv7a.vmfb
 
 iree-compile \
-	--iree-plugin=example2 \
-	--iree-example2-fusion \
+	--iree-plugin=estela \
+	--iree-estela-fusion \
 	--iree-hal-target-backends=llvm-cpu \
 	--iree-llvmcpu-link-embedded=false \
 	$pynq_flags \
 	matmul.mlir -o matmul_armv7a_strela.vmfb
 
 iree-compile \
-	--iree-plugin=example2 \
+	--iree-plugin=estela \
 	--iree-hal-target-backends=strela \
 	--iree-llvmcpu-link-embedded=false \
 	$pynq_flags \

@@ -42,8 +42,8 @@ do
 	esac
 
 	iree-compile \
-		--iree-plugin=example2 \
-		--iree-example2-fusion \
+		--iree-plugin=estela \
+		--iree-estela-fusion \
 		--iree-hal-target-backends=llvm-cpu \
 		--iree-llvmcpu-target-cpu=host \
 		"${stem}.mlir" -o "${stem}.vmfb" >/dev/null 2>&1
@@ -51,8 +51,8 @@ done
 IFS=$old_ifs
 
 # --compile-to={preprocessing,flow,executable-targets,hal} are interesting
-iree-compile --iree-plugin=example2 \
-	--iree-strela-partition \
+iree-compile --iree-plugin=estela \
+	--iree-estela-partition \
 	--iree-hal-target-device=cpu=local \
 	--iree-hal-local-target-device-backends=llvm-cpu \
 	--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf \
@@ -61,8 +61,8 @@ iree-compile --iree-plugin=example2 \
 	 --compile-to=hal \
 	strela_test.mlir
 
-iree-compile --iree-plugin=example2 \
-	--iree-strela-partition \
+iree-compile --iree-plugin=estela \
+	--iree-estela-partition \
 	--iree-hal-target-device=vulkan=vulkan \
 	--iree-hal-target-device=strela=strela \
 	--iree-hal-default-device=vulkan \

@@ -1,0 +1,27 @@
+iree_cc_library(
+  NAME
+    LinalgTransforms
+  HDRS
+    "Passes.h"
+  SRCS
+    "FormStrelaDispatchesPass.cpp"
+    "FuseConv2DPass.cpp"
+  DEPS
+    iree::..::..::compiler::src::estela::defs
+    iree::..::..::compiler::src::estela::Utils::Utils
+    iree::compiler::Dialect::Flow::IR
+    iree::compiler::Dialect::HAL::IR
+    iree::compiler::Dialect::Stream::IR
+    iree::compiler::Dialect::Util::IR
+    MLIRArithDialect
+    MLIRFuncDialect
+    MLIRIR
+    MLIRLinalgDialect
+    MLIRLinalgTransforms
+    MLIRLinalgUtils
+    MLIRPass
+    MLIRSupport
+    MLIRTensorDialect
+    MLIRTransforms
+  PUBLIC
+)

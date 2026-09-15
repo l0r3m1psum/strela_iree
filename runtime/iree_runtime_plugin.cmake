@@ -1,0 +1,12 @@
+iree_register_external_hal_driver(
+  NAME
+    strela
+  SOURCE_DIR
+    "${CMAKE_CURRENT_LIST_DIR}/src/estela/hal/drivers/strela"
+  BINARY_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/strela"
+  DRIVER_TARGET
+    ..::..::..::..::runtime::src::estela::hal::drivers::strela::strela
+  REGISTER_FN
+    iree_hal_strela_driver_module_register
+)

@@ -1,0 +1,21 @@
+iree_cc_library(
+  NAME
+    StrelaTransforms
+  HDRS
+    "Passes.h"
+  SRCS
+    "MaterializeBindingsPass.cpp"
+    "ResolveWorkgroupCountPass.cpp"
+  DEPS
+    iree::..::..::compiler::src::estela::defs
+    iree::..::..::compiler::src::estela::Dialect::Strela::IR::IR
+    iree::compiler::Dialect::HAL::IR
+    iree::compiler::Dialect::TensorExt::IR
+    iree::compiler::Dialect::Util::IR
+    MLIRArithDialect
+    MLIRFuncDialect
+    MLIRIR
+    MLIRPass
+    MLIRSupport
+  PUBLIC
+)

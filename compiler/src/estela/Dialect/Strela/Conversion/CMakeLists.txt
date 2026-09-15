@@ -1,0 +1,21 @@
+iree_cc_library(
+  NAME
+    StrelaConversion
+  HDRS
+    "Passes.h"
+  SRCS
+    "ConvertLinalgToStrelaPass.cpp"
+  DEPS
+    iree::..::..::compiler::src::estela::defs
+    iree::..::..::compiler::src::estela::Dialect::Strela::IR::IR
+    iree::..::..::compiler::src::estela::Utils::Utils
+    MLIRArithDialect
+    MLIRFuncDialect
+    MLIRIR
+    MLIRLinalgDialect
+    MLIRLinalgUtils
+    MLIRPass
+    MLIRSupport
+    MLIRTransforms
+  PUBLIC
+)
