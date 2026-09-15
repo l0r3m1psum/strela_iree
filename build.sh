@@ -36,7 +36,7 @@ cmake -G Ninja -B iree-build-arm -S 3rdparty/iree \
 cmake --build iree-build-arm
 
 # The standalone VM module, built against the installed runtime.
-cmake -G Ninja -S runtime/src/estela/Modules -B build \
+cmake -G Ninja -S runtime/src/estela/modules -B build \
     -DIREERuntime_DIR="${PWD}/iree-build/lib/cmake/IREE"
 
 # NOTE: this now fails because strela.h is not available when building on x86_84
@@ -44,7 +44,7 @@ cmake -G Ninja -S runtime/src/estela/Modules -B build \
 # mess I know)
 cmake --build build
 
-cmake -G Ninja -S runtime/src/estela/Modules -B build-arm \
+cmake -G Ninja -S runtime/src/estela/modules -B build-arm \
     -DCMAKE_TOOLCHAIN_FILE="${PWD}/build_tools/arm_toolchain.cmake" \
     -DIREERuntime_DIR="${PWD}/iree-build-arm/lib/cmake/IREE"
 
