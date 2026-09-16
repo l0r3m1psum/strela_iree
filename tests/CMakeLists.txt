@@ -25,3 +25,5 @@ iree_lit_test_suite(
   LABELS
     "hostonly"
 )
+
+add_subdirectory(models)
