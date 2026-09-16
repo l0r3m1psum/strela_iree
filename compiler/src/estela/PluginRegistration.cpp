@@ -27,12 +27,6 @@ struct EstelaOptions {
       llvm::cl::desc("Enable the custom centered-gemm fusion"),
       llvm::cl::cat(category)
     );
-    binder.opt<bool>(
-      "iree-estela-partition",
-      partition,
-      llvm::cl::desc("Enable the partition of supported operations by STRELA from the CPU ones"),
-      llvm::cl::cat(category)
-    );
   }
 };
 
@@ -61,9 +55,10 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   // This is anchored on builtin.module
   void
   extendPreprocessingPassPipeline(OpPassManager &passManager) override {
-    if (options.partition) {
-      passManager.addPass(estela::createFormStrelaDispatchesPass());
-    }
+    // TODO:
+    // populateDecomposeLinalgOpsPattern -> explode each generic to one statement per op.
+    // Greedy re-fuse with your ControlFusionFn budget -> groups the fabric can place.
+    // util.optimization_barrier on each group's results -> DispatchCreation can't merge them back.
   }
 
   void

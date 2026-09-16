@@ -11,6 +11,8 @@ ipaddr="$1"
 
 pynq_flags="--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf --iree-llvmcpu-target-cpu=generic --iree-llvmcpu-target-cpu-features=+vfp3,+neon"
 
+# TODO: ad01_int8.mlir should be generated on the fly
+
 iree-compile \
 	--iree-hal-target-device=local \
 	--iree-hal-local-target-device-backends=vmvx \
@@ -63,6 +65,8 @@ iree-compile \
 	--iree-llvmcpu-link-embedded=false \
 	$pynq_flags \
 	3rdparty/iree/samples/models/simple_abs.mlir -o simple_abs_backend_strela.vmfb
+
+# TODO: add flow.tensor.transfer flow test.
 
 scp iree-build-arm/tools/iree-run-module \
 	build-arm/libcustom_module.so \

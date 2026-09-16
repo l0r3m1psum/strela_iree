@@ -4,7 +4,6 @@ iree_cc_library(
   HDRS
     "Passes.h"
   SRCS
-    "FormStrelaDispatchesPass.cpp"
     "FuseConv2DPass.cpp"
   DEPS
     iree::..::..::compiler::src::estela::defs
