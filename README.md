@@ -3,9 +3,11 @@
 Remember to download the bitstream, driver and library to the FPGA!
 
 It may be necessary to append ` -- -l $(($(nproc) / 2))` to the `cmake --build`
-commands to avoid the WSL VM using too much memory `VmmemWSL` and `hv_balloon`
-start trashing the drive that host the VM hard disk and this slows things down
-to a crawl.
+and `-j $(($(nproc) / 2))` to the `ctest` commands to avoid the WSL VM using
+too much memory `VmmemWSL` and `hv_balloon` start trashing the drive that host
+the VM hard disk and this slows things down to a crawl. Setting `swap=2GB` in
+`%UserProfile%\.wslconfig` should make it so that when too much swap is used
+things start to fail instead of hanging.
 
 ```
 # To build IREE
