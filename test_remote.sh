@@ -11,7 +11,9 @@ ipaddr="$1"
 
 pynq_flags="--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf --iree-llvmcpu-target-cpu=generic --iree-llvmcpu-target-cpu-features=+vfp3,+neon"
 
-# TODO: ad01_int8.mlir should be generated on the fly
+tosa-converter-for-tflite \
+3rdparty/tiny/benchmark/training/anomaly_detection/trained_models/ad01_int8.tflite \
+--text -o ad01_int8.mlir
 
 iree-compile \
 	--iree-hal-target-device=local \
@@ -59,15 +61,6 @@ iree-compile \
 	$pynq_flags \
 	matmul.mlir -o matmul_armv7a_strela.vmfb
 
-iree-compile \
-	--iree-plugin=estela \
-	--iree-hal-target-backends=strela \
-	--iree-llvmcpu-link-embedded=false \
-	$pynq_flags \
-	3rdparty/iree/samples/models/simple_abs.mlir -o simple_abs_backend_strela.vmfb
-
-# TODO: add flow.tensor.transfer flow test.
-
 scp iree-build-arm/tools/iree-run-module \
 	build-arm/libcustom_module.so \
 	simple_abs_vmx.vmfb \
@@ -77,7 +70,6 @@ scp iree-build-arm/tools/iree-run-module \
 	ad01_int8_armv7a_strela.vmfb \
 	matmul_armv7a.vmfb \
 	matmul_armv7a_strela.vmfb \
-	simple_abs_backend_strela.vmfb \
 	"root@${ipaddr}:/root"
 ssh -t "root@${ipaddr}" << EOF
 	set -xe
@@ -123,10 +115,4 @@ ssh -t "root@${ipaddr}" << EOF
 
 	./iree-run-module --list_drivers 2>&1
 	./iree-run-module --list_devices=strela 2>&1
-	./iree-run-module \
-		--module=./libcustom_module.so \
-		--module=simple_abs_backend_strela.vmfb \
-		--function=abs \
-		--input="f32=-1" \
-		--device=strela
 EOF
