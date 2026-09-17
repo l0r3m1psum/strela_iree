@@ -17,6 +17,8 @@ iree_lit_test_suite(
     lit
   SRCS
     "transfer.mlir"
+    "flush/cmd_flush.mlir"
+    "flush/transfer_flush.mlir"
   TOOLS
     FileCheck
     iree-compile
