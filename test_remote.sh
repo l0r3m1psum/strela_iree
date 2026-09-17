@@ -61,6 +61,19 @@ iree-compile \
 	$pynq_flags \
 	matmul.mlir -o matmul_armv7a_strela.vmfb
 
+awk '/^\/\/ -----$/ { exit } { print }' tests/transfer.mlir > transfer_topology.mlir
+
+iree-compile \
+	--iree-plugin=estela \
+	--iree-execution-model=async-external \
+	--iree-hal-target-device=device_a=local[0] \
+	--iree-hal-target-device=device_b=strela \
+	--iree-hal-default-device=device_a \
+	--iree-hal-local-target-device-backends=llvm-cpu \
+	--iree-llvmcpu-link-embedded=false \
+	$pynq_flags \
+	transfer_topology.mlir -o transfer_armv7a_strela.vmfb
+
 scp iree-build-arm/tools/iree-run-module \
 	build-arm/libcustom_module.so \
 	simple_abs_vmx.vmfb \
@@ -70,6 +83,7 @@ scp iree-build-arm/tools/iree-run-module \
 	ad01_int8_armv7a_strela.vmfb \
 	matmul_armv7a.vmfb \
 	matmul_armv7a_strela.vmfb \
+	transfer_armv7a_strela.vmfb \
 	"root@${ipaddr}:/root"
 ssh -t "root@${ipaddr}" << EOF
 	set -xe
@@ -115,4 +129,14 @@ ssh -t "root@${ipaddr}" << EOF
 
 	./iree-run-module --list_drivers 2>&1
 	./iree-run-module --list_devices=strela 2>&1
+	# Expected result: min(relu(1 + 2) + relu(3 - 10)) = 3
+	./iree-run-module \
+		--module=transfer_armv7a_strela.vmfb \
+		--function=main \
+		--input="8x9xi32=1" \
+		--input="8x9xi32=2" \
+		--input="8x9xi32=3" \
+		--input="8x9xi32=-10" \
+		--device=local-sync \
+		--device=strela
 EOF
