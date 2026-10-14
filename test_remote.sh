@@ -13,7 +13,10 @@ pynq_flags="--iree-llvmcpu-target-triple=armv7a-none-linux-gnueabihf --iree-llvm
 
 tosa-converter-for-tflite \
 3rdparty/tiny/benchmark/training/anomaly_detection/trained_models/ad01_int8.tflite \
---text -o ad01_int8.mlir
+-o ad01_int8.mlirbc
+# The converter prints TOSA in the syntax of its own, older, MLIR; bytecode is
+# versioned, so let iree-opt print it in the current one.
+iree-opt ad01_int8.mlirbc -o ad01_int8.mlir
 
 iree-compile \
 	--iree-hal-target-device=local \
@@ -107,25 +110,25 @@ ssh -t "root@${ipaddr}" << EOF
 		--function=main \
 		--input="2x640xi8=0" \
 		--device=local-sync
-	./iree-run-module \
-		--module=./libcustom_module.so \
-		--module=ad01_int8_armv7a_strela.vmfb \
-		--function=main \
-		--input="2x640xi8=0" \
-		--device=local-sync
+	# ./iree-run-module \
+	# 	--module=./libcustom_module.so \
+	# 	--module=ad01_int8_armv7a_strela.vmfb \
+	# 	--function=main \
+	# 	--input="2x640xi8=0" \
+	# 	--device=local-sync
 	./iree-run-module \
 		--module=matmul_armv7a.vmfb \
 		--function=main \
 		--input="1x1x1x9xi8=2" \
 		--input="9x1x1x9xi8=2" \
 		--device=local-sync
-	./iree-run-module \
-		--module=./libcustom_module.so \
-		--module=matmul_armv7a_strela.vmfb \
-		--function=main \
-		--input="1x1x1x9xi8=2" \
-		--input="9x1x1x9xi8=2" \
-		--device=local-sync
+	# ./iree-run-module \
+	# 	--module=./libcustom_module.so \
+	# 	--module=matmul_armv7a_strela.vmfb \
+	# 	--function=main \
+	# 	--input="1x1x1x9xi8=2" \
+	# 	--input="9x1x1x9xi8=2" \
+	# 	--device=local-sync
 
 	./iree-run-module --list_drivers 2>&1
 	./iree-run-module --list_devices=strela 2>&1

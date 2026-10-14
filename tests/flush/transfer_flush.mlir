@@ -1,3 +1,7 @@
+// XFAIL: *
+// stream.cmd.flush is still erased on upstream main; the lowering is in
+// iree-org/iree#24962. Remove the XFAIL once it lands.
+//
 // Minimal program that produces a stream.cmd.flush.
 //
 // ScheduleAllocation lowers stream.async.transfer into:

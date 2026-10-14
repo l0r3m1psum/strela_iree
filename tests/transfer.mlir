@@ -58,7 +58,7 @@ module attributes {
   ) -> (i32 {iree.abi.affinity = #hal.device.promise<@device_a>}) {
     %zero = "tosa.const"() { values = dense<0> : tensor<1x1xi32> } : () -> tensor<1x1xi32>
     %c0 = arith.constant 0 : index
-    %new_shape = tosa.const_shape {values = dense<[-1]> : tensor<1xindex>} : () -> !tosa.shape<1>
+    %new_shape = tosa.const_shape values(dense<[-1]> : tensor<1xindex>) : () -> !tosa.shape<1>
 
     %i2_b = flow.tensor.transfer %i2 : tensor<8x9xi32> to #hal.device.promise<@device_b>
     %i3_b = flow.tensor.transfer %i3 : tensor<8x9xi32> to #hal.device.promise<@device_b>
@@ -78,7 +78,7 @@ module attributes {
     %a2 = "tosa.add"(%r0, %r1) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
 
     %flattened = tosa.reshape %a2, %new_shape : (tensor<8x9xi32>, !tosa.shape<1>) -> tensor<72xi32>
-    %min_tensor = tosa.reduce_min %flattened {axis = 0 : i32} : (tensor<72xi32>) -> tensor<1xi32>
+    %min_tensor = tosa.reduce_min %flattened axis(0) : (tensor<72xi32>) -> tensor<1xi32>
     %min_scalar = tensor.extract %min_tensor[%c0] : tensor<1xi32>
     return %min_scalar : i32
   }
@@ -115,7 +115,7 @@ module {
   ) -> (i32 {iree.abi.affinity = #hal.device.promise<@device_a>}) {
     %zero = "tosa.const"() { values = dense<0> : tensor<1x1xi32> } : () -> tensor<1x1xi32>
     %c0 = arith.constant 0 : index
-    %new_shape = tosa.const_shape {values = dense<[-1]> : tensor<1xindex>} : () -> !tosa.shape<1>
+    %new_shape = tosa.const_shape values(dense<[-1]> : tensor<1xindex>) : () -> !tosa.shape<1>
 
     %i2_b = flow.tensor.transfer %i2 : tensor<8x9xi32> to #hal.device.promise<@device_b>
     %i3_b = flow.tensor.transfer %i3 : tensor<8x9xi32> to #hal.device.promise<@device_b>
@@ -133,7 +133,7 @@ module {
     %a2 = "tosa.add"(%r0, %r1) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
 
     %flattened = tosa.reshape %a2, %new_shape : (tensor<8x9xi32>, !tosa.shape<1>) -> tensor<72xi32>
-    %min_tensor = tosa.reduce_min %flattened {axis = 0 : i32} : (tensor<72xi32>) -> tensor<1xi32>
+    %min_tensor = tosa.reduce_min %flattened axis(0) : (tensor<72xi32>) -> tensor<1xi32>
     %min_scalar = tensor.extract %min_tensor[%c0] : tensor<1xi32>
     return %min_scalar : i32
   }

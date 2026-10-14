@@ -3,13 +3,15 @@
 # Run in CMake script mode so there is no shell involved and the test works on
 # any platform cmake does:
 #
-#   cmake -DTFLITE=... -DOUTDIR=... -DCONVERTER=... -DIREE_COMPILE=...
-#         -DIREE_RUN_MODULE=... -DINPUT=1x640xi8 [-DPIN_BATCH=ON]
+#   cmake -DTFLITE=... -DOUTDIR=... -DCONVERTER=... -DIREE_OPT=...
+#         -DIREE_COMPILE=... -DIREE_RUN_MODULE=... -DINPUT=1x640xi8
+#         [-DPIN_BATCH=ON]
 #         -P run_model.cmake
 #
 # Artifacts go to <OUTDIR>/<model>/ so nothing is written into the source tree:
 #
-#   <model>.mlir         TOSA input from the converter
+#   <model>.mlirbc       TOSA input from the converter, as bytecode
+#   <model>.mlir         the same, printed as text by iree-opt
 #   <model>.static.mlir  only when PIN_BATCH is set
 #   <model>.vmfb         the module that was run
 #   run.txt              iree-run-module output, including the result tensors
@@ -46,9 +48,13 @@ set(_dir "${OUTDIR}/${_stem}")
 file(MAKE_DIRECTORY "${_dir}")
 message(STATUS "artifacts: ${_dir}")
 
-# 1. .tflite -> TOSA MLIR.
+# 1. .tflite -> TOSA MLIR. The converter is built against its own MLIR, whose
+#    text syntax for TOSA ops can be older than IREE's. Bytecode is versioned and
+#    readable by newer MLIR, so it is printed as text by iree-opt instead.
 estela_run_step("conversion"
-  "${CONVERTER}" "${TFLITE}" --text -o "${_dir}/${_stem}.mlir")
+  "${CONVERTER}" "${TFLITE}" -o "${_dir}/${_stem}.mlirbc")
+estela_run_step("printing"
+  "${IREE_OPT}" "${_dir}/${_stem}.mlirbc" -o "${_dir}/${_stem}.mlir")
 set(_source "${_dir}/${_stem}.mlir")
 
 # 2. The converter leaves the batch dimension dynamic. An unbounded dimension

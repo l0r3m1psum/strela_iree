@@ -113,7 +113,7 @@ iree_hal_strela_driver_query_available_devices(
   iree_hal_device_info_t *device_infos = NULL;
 
   if (iree_status_is_ok(status)) {
-    if (strela_device_count(&strela_count) == -1) {
+    if (strela_dev_count(&strela_count) == -1) {
       status = iree_status_from_code(IREE_STATUS_NOT_FOUND);
     }
   }

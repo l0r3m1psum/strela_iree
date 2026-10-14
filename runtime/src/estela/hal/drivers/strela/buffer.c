@@ -1,10 +1,11 @@
 typedef struct iree_hal_strela_buffer_t {
   iree_hal_buffer_t base;
   iree_allocator_t host_allocator;
-  iree_hal_buffer_release_callback_t release_callback;
 
   strela_buffer s_buf;
   void *host_ptr; // NOTE: I don't think that this is needed since STRELA does not have a separate virtual memory
+
+  iree_hal_buffer_release_callback_t release_callback;
 } iree_hal_strela_buffer_t;
 
 static const iree_hal_buffer_vtable_t iree_hal_strela_buffer_vtable;

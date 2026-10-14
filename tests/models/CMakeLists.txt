@@ -54,6 +54,7 @@ foreach(_entry IN LISTS _models)
             "-DTFLITE=${_tiny}/${_path}"
             "-DOUTDIR=${ESTELA_MODEL_OUTPUT_DIR}"
             "-DCONVERTER=${ESTELA_TOSA_CONVERTER}"
+            "-DIREE_OPT=$<TARGET_FILE:iree-opt>"
             "-DIREE_COMPILE=$<TARGET_FILE:iree-compile>"
             "-DIREE_RUN_MODULE=$<TARGET_FILE:iree-run-module>"
             "-DINPUT=${_input}"

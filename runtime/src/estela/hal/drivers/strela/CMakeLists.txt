@@ -2,7 +2,7 @@
 # the HAL driver target, which is also called strela.
 add_library(strela_pynq INTERFACE IMPORTED)
 set_target_properties(strela_pynq PROPERTIES
-  INTERFACE_LINK_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../3rdparty/strela_pynq/lib"
+  INTERFACE_LINK_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../3rdparty/strela_pynq/build-pynq/lib"
   INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../3rdparty/strela_pynq/include"
   INTERFACE_LINK_LIBRARIES "-lstrela"
   SKIP_BUILD_RPATH TRUE

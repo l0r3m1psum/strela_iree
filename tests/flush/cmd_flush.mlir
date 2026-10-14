@@ -1,3 +1,7 @@
+// XFAIL: *
+// stream.cmd.flush is still erased on upstream main; the lowering is in
+// iree-org/iree#24962. Remove the XFAIL once it lands.
+//
 // Stream-level module containing stream.cmd.flush, used to exercise the
 // Stream -> HAL -> VM lowering in isolation (no need to run the whole pipeline).
 //
