@@ -159,7 +159,12 @@ class CustomModuleState final {
         // buffer. The consumption from the kernel side will be an
         // interrupt-driven command pump.
         strela_config(dev, kernel, &conf);
-        strela_execute(dev);
+        if (strela_execute(dev) != STRELA_JOB_OK) {
+          // Buffers leak here too, see below.
+          return iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "STRELA job did not complete");
+        }
       }
     }
 #else
