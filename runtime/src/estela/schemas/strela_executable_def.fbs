@@ -1,0 +1,32 @@
+namespace iree.hal.strela;
+
+// 'STRELA v1 Executable'.
+file_identifier "STR1";
+file_extension "str1";
+
+// Where one CGRA column reads or writes. The address is
+//   binding base + byte_offset + (push constants offset_constants[0..1])
+// with the push constant pair holding the low and high halves of a 64 bit byte
+// offset that only becomes known at dispatch time.
+table ColumnDef {
+  binding:uint32;            // Ordinal in the dispatch binding list.
+  byte_offset:uint64;        // Offset known at compile time, in bytes.
+  offset_constants:[uint32]; // Empty, or the [low, high] push constant ordinals of a runtime offset.
+  word_count:uint32;         // Words moved by the column; 0 leaves the column unused.
+  stride:uint32;             // Inputs only: one word in every `stride`; 0 repeats the first word.
+}
+
+table ExportDef {
+  name:string;        // The name hal.executable.lookup.function asks for.
+  bitstream:[uint32]; // The CGRA configuration, STRELA_KERNEL_SIZE words.
+  inputs:[ColumnDef]; // Exactly four of each, indexed by CGRA column.
+  outputs:[ColumnDef];
+  constant_count:uint32;
+  binding_count:uint32;
+}
+
+table ExecutableDef {
+  exports:[ExportDef];
+}
+
+root_type ExecutableDef;

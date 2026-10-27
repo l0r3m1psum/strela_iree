@@ -19,6 +19,9 @@ iree_lit_test_suite(
     "transfer.mlir"
     "flush/cmd_flush.mlir"
     "flush/transfer_flush.mlir"
+    "runtime/strela_add.mlir"
+    "runtime/strela_ops.mlir"
+    "runtime/strela_transfer.mlir"
   TOOLS
     FileCheck
     iree-compile

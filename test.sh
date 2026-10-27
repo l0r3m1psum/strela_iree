@@ -43,3 +43,13 @@ iree-compile strela_test_transfer.mlir \
 --iree-hal-default-device=device_a \
 --iree-hal-local-target-device-backends=vmvx \
 --compile-to=executable-targets
+
+common="--iree-plugin=estela --iree-execution-model=async-external
+  --iree-hal-target-device=device_a=local[0] --iree-hal-default-device=device_a"
+dev="--iree-hal-target-device=device_b=strela --iree-hal-local-target-device-backends=vmvx"
+iree-compile \
+$common \
+$dev \
+--iree-hal-indirect-command-buffers=true \
+--compile-to=executable-targets \
+tests/runtime/strela_add.mlir

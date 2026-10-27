@@ -3,7 +3,7 @@ typedef struct {
   iree_allocator_t host_allocator;
   IREE_STATISTICS(iree_hal_allocator_statistics_t statistics;)
 
-  strela_dev *dev; // TODO: does this goes here?
+  strela_dev *dev; // owned by the device
 } iree_hal_strela_allocator_t;
 
 static const iree_hal_allocator_vtable_t iree_hal_strela_allocator_vtable;
@@ -22,20 +22,13 @@ iree_hal_strela_allocator_const_cast(const iree_hal_allocator_t *base_value) {
 
 static iree_status_t
 iree_hal_strela_allocator_create(
+  strela_dev *dev,
   iree_allocator_t host_allocator,
   iree_hal_allocator_t **out_allocator
 ) {
   TRACE_FUNC;
   iree_status_t status = iree_ok_status();
-  // NOTE: can I reach the device that created this allocator and take it from there?
-  strela_dev *dev = strela_dev_init(0);
   iree_hal_strela_allocator_t *allocator = NULL;
-
-  if (iree_status_is_ok(status)) {
-    if (!strela_dev_ok(dev)) {
-      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION, "Unable to initialize STRELA");
-    }
-  }
 
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(
@@ -52,9 +45,6 @@ iree_hal_strela_allocator_create(
   }
 
   if (!iree_status_is_ok(status)) {
-    // TODO: The dev should be owned by the instance of iree_hal_strela_device_t
-    // hence it is wrong to deinit on error here (as it is to initialize it above...)
-    strela_dev_deinit(dev);
     if (allocator) {
       iree_hal_allocator_release((iree_hal_allocator_t *)allocator);
     }
@@ -127,9 +117,16 @@ iree_hal_strela_allocator_query_buffer_compatibility(
 
   (void)allocator;
 
+  // HOST_COHERENT is honoured even though the CPU maps STRELA memory cached and
+  // the CGRA does not snoop: the CGRA is the only other party, and every
+  // dispatch flushes all of its columns before the job and invalidates its
+  // outputs after, so the CPU never sees anything stale.
   params->type |= IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params->access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params->usage |= IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_MAPPING;
+  // libstrela maps all of STRELA memory once, so a persistent mapping costs
+  // nothing.
+  params->usage |= IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH
+    | IREE_HAL_BUFFER_USAGE_MAPPING | IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT;
 
   return IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE
     | IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER
@@ -166,20 +163,24 @@ iree_hal_strela_allocator_allocate_buffer(
   }
 
   if (iree_status_is_ok(status)) {
-    s_buf = strela_buffer_alloc(allocator->dev, allocation_size);
-    if (s_buf.valid) {
-      host_ptr = strela_buffer_to_ptr(allocator->dev, s_buf);
-    } else {
-      status = iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION, "Unable to allocate STRELA buffer"
-      );
-    }
+    // Whole cache lines, so a sync never reaches the allocator's bookkeeping
+    // or a neighbour. libstrela counts in words.
+    iree_device_size_t padded_size =
+      iree_device_align(allocation_size, IREE_HAL_STRELA_CACHE_LINE);
+    s_buf = strela_buffer_alloc(allocator->dev, padded_size / sizeof(strela_word));
+    status = iree_hal_strela_status_from_dev(allocator->dev, "allocating a STRELA buffer");
+  }
+
+  if (iree_status_is_ok(status)) {
+    host_ptr = strela_buffer_to_ptr(allocator->dev, s_buf);
   }
 
   if (iree_status_is_ok(status)) {
     iree_hal_memory_type_t actual_type = params->type | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
     iree_hal_memory_access_t actual_access = IREE_HAL_MEMORY_ACCESS_ALL;
-    iree_hal_buffer_usage_t actual_usage = params->usage | IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_MAPPING;
+    iree_hal_buffer_usage_t actual_usage = params->usage | IREE_HAL_BUFFER_USAGE_TRANSFER
+      | IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_MAPPING
+      | IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT;
 
     status = iree_hal_strela_buffer_wrap(
       iree_hal_buffer_placement_undefined(),
@@ -189,6 +190,7 @@ iree_hal_strela_allocator_allocate_buffer(
       allocation_size,
       /*byte_offset=*/0,
       allocation_size,
+      allocator->dev,
       s_buf,
       host_ptr,
       (iree_hal_buffer_release_callback_t){

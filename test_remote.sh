@@ -64,7 +64,20 @@ iree-compile \
 	$pynq_flags \
 	matmul.mlir -o matmul_armv7a_strela.vmfb
 
-awk '/^\/\/ -----$/ { exit } { print }' tests/transfer.mlir > transfer_topology.mlir
+# tests/transfer.mlir declares unified memory, which binds the CPU's own buffers
+# to STRELA dispatches; the HAL now rejects that instead of letting the CGRA DMA
+# from memory it cannot reach. tests/runtime/strela_ops.mlir has the topology
+# STRELA really has.
+iree-compile \
+	--iree-plugin=estela \
+	--iree-execution-model=async-external \
+	--iree-hal-target-device=device_a=local[0] \
+	--iree-hal-target-device=device_b=strela \
+	--iree-hal-default-device=device_a \
+	--iree-hal-local-target-device-backends=llvm-cpu \
+	--iree-llvmcpu-link-embedded=false \
+	$pynq_flags \
+	tests/runtime/strela_ops.mlir -o strela_ops_armv7a.vmfb
 
 iree-compile \
 	--iree-plugin=estela \
@@ -75,9 +88,10 @@ iree-compile \
 	--iree-hal-local-target-device-backends=llvm-cpu \
 	--iree-llvmcpu-link-embedded=false \
 	$pynq_flags \
-	transfer_topology.mlir -o transfer_armv7a_strela.vmfb
+	tests/runtime/strela_transfer.mlir -o strela_transfer_armv7a.vmfb
 
 scp iree-build-arm/tools/iree-run-module \
+	3rdparty/strela_pynq/build-pynq/lib/libstrela.so \
 	build-arm/libcustom_module.so \
 	simple_abs_vmx.vmfb \
 	simple_abs_armv7a.vmfb \
@@ -86,10 +100,16 @@ scp iree-build-arm/tools/iree-run-module \
 	ad01_int8_armv7a_strela.vmfb \
 	matmul_armv7a.vmfb \
 	matmul_armv7a_strela.vmfb \
-	transfer_armv7a_strela.vmfb \
+	strela_ops_armv7a.vmfb \
+	strela_transfer_armv7a.vmfb \
 	"root@${ipaddr}:/root"
 ssh -t "root@${ipaddr}" << EOF
 	set -xe
+	# The board also has an old libstrela in /usr/local/lib, which ldconfig
+	# would find first.
+	export LD_LIBRARY_PATH=/root
+	# TODO(Diego): I guess I have to install there the new libstrela when
+	# downloading files to the board in the strela_pynq project.
 	./iree-run-module \
 		--module=simple_abs_vmx.vmfb \
 		--function=abs \
@@ -132,14 +152,36 @@ ssh -t "root@${ipaddr}" << EOF
 
 	./iree-run-module --list_drivers 2>&1
 	./iree-run-module --list_devices=strela 2>&1
-	# Expected result: min(relu(1 + 2) + relu(3 - 10)) = 3
+	# --device_lead_allocator=1 puts buffers both devices touch in STRELA
+	# memory, the only memory the CGRA can reach.
 	./iree-run-module \
-		--module=transfer_armv7a_strela.vmfb \
+		--module=strela_ops_armv7a.vmfb \
+		--function=add \
+		--input="16xi32=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16" \
+		--input="16xi32=10 20 30 40 50 60 70 80 90 100 110 120 130 140 150 160" \
+		--expected_output="16xi32=11 22 33 44 55 66 77 88 99 110 121 132 143 154 165 176" \
+		--device=local-sync \
+		--device=strela \
+		--device_lead_allocator=1
+	./iree-run-module \
+		--module=strela_ops_armv7a.vmfb \
+		--function=relu \
+		--input="16xi32=-1 2 -3 4 -5 6 -7 8 -9 10 -11 12 -13 14 -15 16" \
+		--expected_output="16xi32=0 2 0 4 0 6 0 8 0 10 0 12 0 14 0 16" \
+		--device=local-sync \
+		--device=strela \
+		--device_lead_allocator=1
+	# Expected result: min(relu(1 + 2) + relu(3 - 10)) = 3. Not checked with
+	# --expected_output: iree-run-module fails a scalar i32 against i32 as a
+	# "variant types mismatch".
+	./iree-run-module \
+		--module=strela_transfer_armv7a.vmfb \
 		--function=main \
 		--input="8x9xi32=1" \
 		--input="8x9xi32=2" \
 		--input="8x9xi32=3" \
 		--input="8x9xi32=-10" \
 		--device=local-sync \
-		--device=strela
+		--device=strela \
+		--device_lead_allocator=1
 EOF

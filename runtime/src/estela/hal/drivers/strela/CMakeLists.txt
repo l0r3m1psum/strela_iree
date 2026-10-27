@@ -16,10 +16,15 @@ iree_cc_library(
     "strela_driver_module.c"
   DEPS
     iree::hal
+    iree::base::internal::arena
+    iree::base::internal::flatcc::parsing
+    iree::hal::utils::deferred_command_buffer
     iree::hal::utils::deferred_work_queue
+    iree::hal::utils::executable_header
     iree::hal::utils::file_transfer
     iree::hal::utils::queue_emulation
     iree::hal::utils::queue_host_call_emulation
+    estela::schemas::strela_executable_def_c_fbs
     strela_pynq
   PUBLIC
 )

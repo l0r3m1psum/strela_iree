@@ -7,6 +7,12 @@ add_subdirectory(
   "${CMAKE_CURRENT_BINARY_DIR}/estela"
 )
 
+# The executable schema shared with the runtime, which the target backend writes.
+add_subdirectory(
+  "${CMAKE_CURRENT_LIST_DIR}/../runtime/src/estela/schemas"
+  "${CMAKE_CURRENT_BINARY_DIR}/estela_schemas"
+)
+
 # Nothing but the plugin session: options, the pass pipelines it installs, and
 # the HAL target registration.
 iree_cc_library(

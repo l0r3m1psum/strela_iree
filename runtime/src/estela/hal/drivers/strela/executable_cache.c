@@ -1,6 +1,7 @@
 typedef struct iree_hal_strela_executable_cache_t {
   iree_hal_resource_t resource;
   iree_allocator_t host_allocator;
+  strela_dev *dev;
 } iree_hal_strela_executable_cache_t;
 
 static const iree_hal_executable_cache_vtable_t iree_hal_strela_executable_cache_vtable;
@@ -13,6 +14,7 @@ iree_hal_strela_executable_cache_cast(iree_hal_executable_cache_t *base_value) {
 
 static iree_status_t
 iree_hal_strela_executable_cache_create(
+  strela_dev *dev,
   iree_string_view_t identifier,
   iree_allocator_t host_allocator,
   iree_hal_executable_cache_t **out_executable_cache
@@ -32,6 +34,7 @@ iree_hal_strela_executable_cache_create(
       &iree_hal_strela_executable_cache_vtable, &executable_cache->resource
     );
     executable_cache->host_allocator = host_allocator;
+    executable_cache->dev = dev;
   }
 
   if (!iree_status_is_ok(status) && executable_cache) {
@@ -64,11 +67,10 @@ iree_hal_strela_executable_cache_infer_format(
   iree_host_size_t *out_inferred_size
 ) {
   TRACE_FUNC;
-  iree_hal_strela_executable_cache_t* executable_cache = iree_hal_strela_executable_cache_cast(base_executable_cache);
-
-  (void)executable_cache;
-
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  return iree_hal_strela_executable_infer_format(
+    executable_data, executable_format_capacity, executable_format,
+    out_inferred_size
+  );
 }
 
 static bool
@@ -99,7 +101,8 @@ iree_hal_strela_executable_cache_prepare_executable(
   (void)executable_cache;
 
   return iree_hal_strela_executable_create(
-    executable_params, executable_cache->host_allocator, out_executable
+    executable_cache->dev, executable_params, executable_cache->host_allocator,
+    out_executable
   );
 }
 

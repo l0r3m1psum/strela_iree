@@ -2,6 +2,7 @@ typedef struct iree_hal_strela_buffer_t {
   iree_hal_buffer_t base;
   iree_allocator_t host_allocator;
 
+  strela_dev *dev;
   strela_buffer s_buf;
   void *host_ptr; // NOTE: I don't think that this is needed since STRELA does not have a separate virtual memory
 
@@ -9,6 +10,13 @@ typedef struct iree_hal_strela_buffer_t {
 } iree_hal_strela_buffer_t;
 
 static const iree_hal_buffer_vtable_t iree_hal_strela_buffer_vtable;
+
+// Whether |base_value| itself is a STRELA buffer. A subspan of one is not: ask
+// iree_hal_buffer_allocated_buffer() first.
+static bool
+iree_hal_strela_buffer_isa(const iree_hal_buffer_t *base_value) {
+  return iree_hal_resource_is(base_value, &iree_hal_strela_buffer_vtable);
+}
 
 static iree_hal_strela_buffer_t *
 iree_hal_strela_buffer_cast(iree_hal_buffer_t* base_value) {
@@ -33,6 +41,7 @@ iree_hal_strela_buffer_wrap(
   iree_device_size_t byte_offset,
   iree_device_size_t byte_length,
 
+  strela_dev *dev,
   strela_buffer s_buf,
   void *host_ptr,
 
@@ -66,6 +75,7 @@ iree_hal_strela_buffer_wrap(
     );
     buffer->host_allocator = host_allocator;
     buffer->release_callback = release_callback;
+    buffer->dev = dev;
     buffer->s_buf = s_buf;
     buffer->host_ptr = host_ptr;
     buffer_base = &buffer->base;
@@ -144,25 +154,74 @@ iree_hal_strela_buffer_unmap_range(
   return iree_ok_status();
 }
 
-static iree_status_t
-iree_hal_strela_buffer_invalidate_range(
-  iree_hal_buffer_t *buffer,
-  iree_device_size_t local_byte_offset,
-  iree_device_size_t local_byte_length
+// Given a range [byte_offset,byte_offset+byte_length) it rounds down the
+// start and rounds up the end so that the range size is a multiple of the cache
+// cache size and it is aligned to it.
+//  <------[offset,offset+length)------->
+// |-------------------------------------|-------------------------------------|
+static void
+iree_hal_strela_buffer_lines(
+  iree_device_size_t byte_offset,
+  iree_device_size_t byte_length,
+  size_t *out_offset_words,
+  size_t *out_count_words
 ) {
-  TRACE_FUNC;
-  // TODO: here cache invalidation
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  iree_device_size_t start = byte_offset & ~(iree_device_size_t)(IREE_HAL_STRELA_CACHE_LINE - 1);
+  iree_device_size_t end = iree_device_align(byte_offset + byte_length, IREE_HAL_STRELA_CACHE_LINE);
+  *out_offset_words = start / sizeof(strela_word);
+  *out_count_words = (end - start) / sizeof(strela_word);
 }
 
+// Makes what the device wrote visible to the CPU. The lines at the edges may
+// also hold CPU writes to the same buffer outside the range, so they are
+// cleaned first and nothing the CPU wrote is lost.
 static iree_status_t
-iree_hal_strela_buffer_flush_range(
-  iree_hal_buffer_t *buffer,
+iree_hal_strela_buffer_invalidate_range(
+  iree_hal_buffer_t *base_buffer,
   iree_device_size_t local_byte_offset,
   iree_device_size_t local_byte_length
 ) {
   TRACE_FUNC;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
+  iree_hal_strela_buffer_t *buffer = iree_hal_strela_buffer_cast(base_buffer);
+  size_t offset = 0, count = 0;
+
+  iree_hal_strela_buffer_lines(local_byte_offset, local_byte_length, &offset, &count);
+  strela_buffer_flush(buffer->dev, buffer->s_buf, offset, count);
+  strela_buffer_inval(buffer->dev, buffer->s_buf, offset, count);
+  return iree_hal_strela_status_from_dev(buffer->dev, "invalidating a STRELA buffer");
+}
+
+// Makes what the CPU wrote visible to the device.
+static iree_status_t
+iree_hal_strela_buffer_flush_range(
+  iree_hal_buffer_t *base_buffer,
+  iree_device_size_t local_byte_offset,
+  iree_device_size_t local_byte_length
+) {
+  TRACE_FUNC;
+  iree_hal_strela_buffer_t *buffer = iree_hal_strela_buffer_cast(base_buffer);
+  size_t offset = 0, count = 0;
+
+  iree_hal_strela_buffer_lines(local_byte_offset, local_byte_length, &offset, &count);
+  strela_buffer_flush(buffer->dev, buffer->s_buf, offset, count);
+  return iree_hal_strela_status_from_dev(buffer->dev, "flushing a STRELA buffer");
+}
+
+// The STRELA buffer behind |base_buffer| and the word its byte |offset| falls
+// on, or NULL if the memory is not STRELA's: the CGRA cannot reach anything
+// else.
+static iree_hal_strela_buffer_t *
+iree_hal_strela_buffer_resolve(
+  iree_hal_buffer_t *base_buffer,
+  iree_device_size_t offset,
+  iree_device_size_t *out_allocated_offset
+) {
+  iree_hal_buffer_t *allocated = iree_hal_buffer_allocated_buffer(base_buffer);
+  if (!iree_hal_strela_buffer_isa(allocated)) {
+    return NULL;
+  }
+  *out_allocated_offset = iree_hal_buffer_byte_offset(base_buffer) + offset;
+  return iree_hal_strela_buffer_cast(allocated);
 }
 
 static const iree_hal_buffer_vtable_t

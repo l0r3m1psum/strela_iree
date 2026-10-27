@@ -14,6 +14,9 @@ iree_cc_library(
     iree::compiler::Dialect::HAL::IR
     iree::compiler::Dialect::HAL::Target
     iree::compiler::Dialect::Stream::IR
+    iree::compiler::Utils
+    iree::base::internal::flatcc::building
+    estela::schemas::strela_executable_def_c_fbs
     MLIRFuncDialect
     MLIRIR
     MLIRPass

@@ -1,3 +1,8 @@
+add_subdirectory(
+  "${CMAKE_CURRENT_LIST_DIR}/src/estela/schemas"
+  "${CMAKE_CURRENT_BINARY_DIR}/estela_schemas"
+)
+
 iree_register_external_hal_driver(
   NAME
     strela

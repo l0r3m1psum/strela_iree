@@ -13,6 +13,35 @@ is_all_zero(const void *ptr, size_t size) {
 
 #define TRACE_FUNC do { printf("%s\n", __func__); } while(0)
 
+// libstrela keeps one sticky error per device. Turns it into a status and
+// clears it, so the device stays usable after a failed call.
+static iree_status_t
+iree_hal_strela_status_from_dev(strela_dev *dev, const char *what) {
+  if (strela_dev_ok(dev)) {
+    return iree_ok_status();
+  }
+  int errnum = strela_dev_get_err(dev).errnum;
+  strela_dev_reset_err(dev);
+  if (errnum > 0) {
+    return iree_make_status(
+      iree_status_code_from_errno(errnum), "%s: %s", what, strerror(errnum)
+    );
+  }
+  switch (-errnum) {
+  case STRELA_ERR_NO_MEM:
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "%s: out of STRELA memory", what);
+  case STRELA_ERR_BAD_ARG:
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "%s: rejected by libstrela", what);
+  default:
+    return iree_make_status(IREE_STATUS_INTERNAL, "%s: libstrela error %d", what, errnum);
+  }
+}
+
+enum {
+  // libstrela syncs whole cache lines, and the driver checks against this.
+  IREE_HAL_STRELA_CACHE_LINE = 64,
+};
+
 #include "buffer.c"
 #include "allocator.c"
 #include "executable.c"
