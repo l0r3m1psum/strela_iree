@@ -168,6 +168,6 @@ func.func @bypass(%arg: tensor<?xi32>) -> (tensor<?xi32>) {
 
 func.func @relu(%input: tensor<?xi32>) -> (tensor<?xi32>) {
   %zero = "tosa.const"() { values = dense<0> : tensor<1xi32> } : () -> tensor<1xi32>
-  %relu = tosa.maximum %input_b, %zero : (tensor<?xi32>, tensor<1xi32>) -> tensor<?xi32>
+  %relu = tosa.maximum %input, %zero : (tensor<?xi32>, tensor<1xi32>) -> tensor<?xi32>
   return %relu : tensor<?xi32>
 }
