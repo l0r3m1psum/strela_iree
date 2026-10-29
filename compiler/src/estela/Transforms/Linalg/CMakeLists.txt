@@ -5,6 +5,8 @@ iree_cc_library(
     "Passes.h"
   SRCS
     "FuseConv2DPass.cpp"
+    "TransferWrapPass.cpp"
+    "AssignTopologyPass.cpp"
   DEPS
     iree::..::..::compiler::src::estela::defs
     iree::..::..::compiler::src::estela::Utils::Utils

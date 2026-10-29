@@ -9,6 +9,10 @@ namespace mlir::estela {
 
 std::unique_ptr<Pass> createFuseConv2DPass();
 
+std::unique_ptr<Pass> createTransferWrapPass();
+
+std::unique_ptr<Pass> createAssignTopologyPass();
+
 } // namespace mlir::estela
 
 #endif // ESTELA_TRANSFORMS_LINALG_PASSES_H_

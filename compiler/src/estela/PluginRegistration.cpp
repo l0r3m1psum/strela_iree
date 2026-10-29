@@ -44,17 +44,26 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   extendCustomInputConversionPassPipeline(
     OpPassManager& passManager, std::string_view typeMnemonic
   ) override {
-      bool extensionsWereMade = false;
-      if (options.enable_fusion) {
-        passManager.addNestedPass<func::FuncOp>(estela::createFuseConv2DPass());
-        extensionsWereMade = true;
-      }
-      return extensionsWereMade;
+    // FIXME(Diego): this should not be here but in extendPreprocessingPassPipeline
+    // This pass should be used just to convert from things like
+    // typeMnemonic=="stablehlo"
+    bool extensionsWereMade = false;
+    if (options.enable_fusion) {
+      passManager.addNestedPass<func::FuncOp>(estela::createFuseConv2DPass());
+      extensionsWereMade = true;
+    }
+    return extensionsWereMade;
   }
 
-  // This is anchored on builtin.module
+  // Happens between --compile-to=abi and --compile-to=preprocessing
+  // iree-compile --iree-plugin=estela --iree-hal-target-device=strela \
+  // --compile-to=preprocessing --mlir-print-ir-before=<first-pass> \
+  //  --mlir-disable-threading -mlir-print-ir-module-scope \
+  // <file-name> -o /dev/null
   void
   extendPreprocessingPassPipeline(OpPassManager &passManager) override {
+    passManager.addPass(estela::createAssignTopologyPass());
+    passManager.addNestedPass<IREE::Util::FuncOp>(estela::createTransferWrapPass());
     // TODO:
     // populateDecomposeLinalgOpsPattern -> explode each generic to one statement per op.
     // Greedy re-fuse with your ControlFusionFn budget -> groups the fabric can place.

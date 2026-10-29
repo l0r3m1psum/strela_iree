@@ -22,6 +22,7 @@ iree_lit_test_suite(
     "runtime/strela_add.mlir"
     "runtime/strela_ops.mlir"
     "runtime/strela_transfer.mlir"
+    "end2end.mlir"
   TOOLS
     FileCheck
     iree-compile
