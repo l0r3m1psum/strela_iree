@@ -1,4 +1,5 @@
 #include "estela/Transforms/Linalg/Passes.h"
+#include "estela/Utils/KernelMatchers.h"
 
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
@@ -19,6 +20,8 @@ using namespace mlir::iree_compiler;
 
 namespace {
 
+// TODO(Diego): This is unused and should be merged with the one in
+// KernelMatchers.cpp that does a slightly different thing.
 static bool
 isStrelaAdd(linalg::GenericOp op) {
   if (!linalg::isaElemwiseSingleBinaryOpInterface(op)) return false;
@@ -59,26 +62,41 @@ findStrelaAffinity(Operation *op) {
   return {};
 }
 
+static bool
+isInt32Immediate(Value value) {
+  DenseIntElementsAttr attr;
+  return matchPattern(value, m_Constant(&attr)) && attr.isSplat() &&
+         attr.getElementType().isInteger(32);
+}
+
 static void
 wrapInTransfers(
   RewriterBase &rewriter, linalg::GenericOp op, Attribute strela, Attribute host
 ) {
   Location loc = op.getLoc();
   rewriter.setInsertionPoint(op);
+
   for (OpOperand *input : op.getDpsInputOperands()) {
+    Value value = input->get();
+    // A splat is folded into the op, during dispatch formation
+    // (--compile-to=dispatch-creation), and becomes a STRELA immediate, which a
+    // transfer would prevent. Other constants have to arrive through a binding.
+    if (isInt32Immediate(value)) continue;
+
     SmallVector<Value> dims = IREE::Util::buildDynamicDimsForValue(
-      loc, op.getDpsInitOperand(0)->get(), rewriter
+      loc, value, rewriter
     );
     Value transfer = IREE::Flow::TensorTransferOp::create(
-      rewriter, loc, input->get().getType(), input->get(), dims, strela
+      rewriter, loc, value.getType(), value, dims, strela
     );
     rewriter.modifyOpInPlace(op, [&] { input->set(transfer); });
   }
 
   rewriter.setInsertionPointAfter(op);
-  Value result = op->getResult(0);
-  auto back = IREE::Flow::TensorTransferOp::create(rewriter, loc, result, host);
-  rewriter.replaceAllUsesExcept(result, back, back);
+  for (OpResult result : op->getResults()) {
+    auto back = IREE::Flow::TensorTransferOp::create(rewriter, loc, result, host);
+    rewriter.replaceAllUsesExcept(result, back, back);
+  }
 }
 
 static void
@@ -128,7 +146,7 @@ struct TransferWrapPass
 
     SmallVector<linalg::GenericOp> candidates;
     funcOp.walk([&](linalg::GenericOp op) {
-      if (isStrelaAdd(op)) candidates.push_back(op);
+      if (estela::isSupportedByStrela(op)) candidates.push_back(op);
     });
 
     IRRewriter rewriter(&getContext());

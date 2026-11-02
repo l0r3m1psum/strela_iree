@@ -153,8 +153,6 @@ struct MyRewritePass : public PassWrapper<MyRewritePass, OperationPass<func::Fun
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
     mlir::MLIRContext *context = &getContext();
-    llvm::errs() << "DEBUG: MyRewritePass is running on operation: "
-               << funcOp.getName() << "\n";
     RewritePatternSet patterns(context);
     patterns.add<DoubleRoundRewriter, DynamicBatchRewriter>(context);
 

@@ -64,7 +64,15 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // flow dialect and linalg computations are gruupped in flow.executable. For the
 // moment we do not go in more detail here...
 
-// TODO: FLW:
+// RUN: iree-compile --iree-plugin=estela \
+// RUN:   --iree-hal-target-device=cpu0=local[0] \
+// RUN:   --iree-hal-target-device=strela0=strela \
+// RUN:   --iree-hal-default-device=cpu0 \
+// RUN:   --iree-hal-local-target-device-backends=vmvx \
+// RUN:   --compile-to=flow %s | FileCheck %s --check-prefix=FLW
+
+// FLW-LABEL: module attributes {
+// TODO: flow test
 
 // After the data flow phase the parallelism in the dataflow graph is made
 // explicit with the stream dialect. The broadcast are independent and can run
@@ -156,18 +164,55 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 
 // -----
 
-// TODO(Diego): describe what happens in the trivial case.
+// This is the trivial case and it just returns the buffer view without touching
+// it.
 
 func.func @bypass(%arg: tensor<?xi32>) -> (tensor<?xi32>) {
   return %arg : tensor<?xi32>
 }
 
+// INP-LABEL: module attributes {
+
+// PRE-LABEL: module attributes {
+// PRE-NOT:     flow.tensor.transfer
+
+// STM-LABEL: module attributes {
+// STM-NOT:     stream.cmd.execute
+
+// EXC-LABEL: module attributes {
+// EXC-NOT:     hal.executable private
+// EXC:         util.func public @bypass(%[[ARG:.+]]: !hal.buffer_view) -> !hal.buffer_view
+// EXC:           util.return %[[ARG]] : !hal.buffer_view
+
 // -----
 
-// TODO: check that strela.relu %{{.+}} : tensor<?xi32> is produced
+// TODO(Diego): make this more meaningful.
+// TODO(Diego): show how constants are handled. Small constants can be baked in
+// the kernel bitstream while big constants (weights) need to be moved to a
+// STRELA addressable memory.
 
 func.func @relu(%input: tensor<?xi32>) -> (tensor<?xi32>) {
   %zero = "tosa.const"() { values = dense<0> : tensor<1xi32> } : () -> tensor<1xi32>
   %relu = tosa.maximum %input, %zero : (tensor<?xi32>, tensor<1xi32>) -> tensor<?xi32>
   return %relu : tensor<?xi32>
+}
+
+// INP-LABEL: module attributes {
+// PRE-LABEL: module attributes {
+// STM-LABEL: module attributes {
+// EXC-LABEL: module attributes {
+// EXC: %{{.+}} = strela.relu %{{.+}} : tensor<?xi32>
+
+// -----
+
+// STRELA can have immediate scalar values (int32) in its bitstream but bigger
+// constants need to be moved to STRELA addressable memory.
+
+func.func @add_big_const(%input: tensor<16xi32>) -> (tensor<16xi32>) {
+  %big_const = "tosa.const"() {
+    values = dense<[0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,
+                    0x8,0x9,0xA,0xB,0xC,0xD,0xE,0xF]> : tensor<16xi32>
+  } : () -> tensor<16xi32>
+  %add = "tosa.add"(%big_const, %input) : (tensor<16xi32>, tensor<16xi32>) -> tensor<16xi32>
+  return %add : tensor<16xi32>
 }

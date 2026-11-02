@@ -110,8 +110,6 @@ struct LinalgToStrelaPass
     if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
       signalPassFailure();
     }
-
-    print(funcOp);
   }
 };
 

@@ -307,8 +307,6 @@ struct MyFusionPass : public PassWrapper<MyFusionPass, OperationPass<func::FuncO
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
     mlir::MLIRContext *context = &getContext();
-    llvm::errs() << "DEBUG: MyFusionPass is running on operation: "
-               << funcOp.getName() << "\n";
     RewritePatternSet patterns(context);
     patterns.add<Conv2DOffload>(context);
 

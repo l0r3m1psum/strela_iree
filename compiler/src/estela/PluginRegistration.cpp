@@ -63,6 +63,33 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   void
   extendPreprocessingPassPipeline(OpPassManager &passManager) override {
     passManager.addPass(estela::createAssignTopologyPass());
+    // TODO(Diego): implement a pass that adds this information so that the
+    // compiler prove that some dynamic sizes are the same and needs to push
+    // less constants when launching kernels.
+#if 0
+static void
+tieInputsToInits(RewriterBase &rewriter, linalg::GenericOp op) {
+  rewriter.setInsertionPoint(op);
+  for (OpOperand *input : op.getDpsInputOperands()) {
+    Value value = input->get();
+    if (cast<ShapedType>(value.getType()).hasStaticShape()) continue;
+    for (OpOperand &init : op.getDpsInitsMutable()) {
+      if (init.get().getType() != value.getType() ||
+          op.getMatchingIndexingMap(&init) != op.getMatchingIndexingMap(input)) {
+        continue;
+      }
+      SmallVector<Value> dims = IREE::Util::buildDynamicDimsForValue(
+        op.getLoc(), init.get(), rewriter
+      );
+      Value tied = IREE::Flow::TensorTieShapeOp::create(
+        rewriter, op.getLoc(), value.getType(), value, dims
+      );
+      rewriter.modifyOpInPlace(op, [&] { input->set(tied); });
+      break;
+    }
+  }
+}
+#endif
     passManager.addNestedPass<IREE::Util::FuncOp>(estela::createTransferWrapPass());
     // TODO:
     // populateDecomposeLinalgOpsPattern -> explode each generic to one statement per op.
@@ -73,6 +100,23 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   void
   onRegisterDialects(DialectRegistry &registry) override {
     registry.insert<strela::StrelaDialect>();
+  }
+
+  LogicalResult
+  onActivate() override {
+    const llvm::DenseMap<llvm::StringRef, llvm::cl::Option *> &registered = llvm::cl::getRegisteredOptions();
+    auto *limit = static_cast<llvm::cl::opt<int> *>(
+      registered.lookup("iree-flow-inline-constants-max-byte-length")
+    );
+    if (
+      limit
+      && limit->getNumOccurrences() != 0
+      && limit->getValue() > sizeof (int32_t)
+    ) {
+      mlir::emitWarning(mlir::UnknownLoc::get(context))
+        << "STRELA supports inlining only scalar constants.";
+    }
+    return success();
   }
 
   void
