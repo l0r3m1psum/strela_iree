@@ -98,6 +98,7 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 
 // FLW-LABEL: module attributes {
 // TODO: flow test
+// TODO: talk about the flow.dispatch.tie_shape
 
 // After the data flow phase the parallelism in the dataflow graph is made
 // explicit with the stream dialect. The broadcast are independent and can run
@@ -279,3 +280,49 @@ func.func @add_big_const(%input: tensor<16xi32>) -> (tensor<16xi32>) {
 // FLW:             util.func public @add_big_const(%{{.+}}: !hal.buffer_view) {{.+}} {
 // FLW:               %[[CONST_LOC:.+]] = util.global.load immutable @[[CONST_GLOB]] : tensor<16xi32>
 // FLW:               %{{.+}} = flow.tensor.transfer %[[CONST_LOC]] : tensor<16xi32> to #hal.device.affinity
+
+// -----
+
+func.func @qmatmul(%act: tensor<?x128xi8>, %wgt: tensor<128x128xi8>) -> (tensor<?x128xi8>) {
+  %act_shape = tosa.const_shape values(dense<[-1, 1, 1, 128]> : tensor<4xindex>) : () -> !tosa.shape<4>
+  %wgt_shape = tosa.const_shape values(dense<[128, 1, 1, 128]> : tensor<4xindex>) : () -> !tosa.shape<4>
+  %out_shape = tosa.const_shape values(dense<[-1, 128]> : tensor<2xindex>) : () -> !tosa.shape<2>
+
+  %act4 = tosa.reshape %act, %act_shape : (tensor<?x128xi8>, !tosa.shape<4>) -> tensor<?x1x1x128xi8>
+  %wgt4 = tosa.reshape %wgt, %wgt_shape : (tensor<128x128xi8>, !tosa.shape<4>) -> tensor<128x1x1x128xi8>
+  %bias = "tosa.const"() {values = dense<777> : tensor<128xi32>} : () -> tensor<128xi32>
+
+  %zp_i8 = "tosa.const"() {values = dense<111> : tensor<1xi8>} : () -> tensor<1xi8>
+  %zp_i32 = "tosa.const"() {values = dense<222> : tensor<1xi32>} : () -> tensor<1xi32>
+  %multiplier = "tosa.const"() {values = dense<1073741824> : tensor<1xi32>} : () -> tensor<1xi32>
+  %shift = "tosa.const"() {values = dense<38> : tensor<1xi8>} : () -> tensor<1xi8>
+
+  %acc4 = tosa.conv2d %act4, %wgt4, %bias, %zp_i8, %zp_i8 pad([0, 0, 0, 0]) stride([1, 1]) dilation([1, 1]) acc_type(i32) : (tensor<?x1x1x128xi8>, tensor<128x1x1x128xi8>, tensor<128xi32>, tensor<1xi8>, tensor<1xi8>) -> tensor<?x1x1x128xi32>
+  %out4 = tosa.rescale %acc4, %multiplier, %shift, %zp_i32, %zp_i8 scale32(true) rounding_mode<DOUBLE_ROUND> per_channel(false) input_unsigned(false) output_unsigned(false) : (tensor<?x1x1x128xi32>, tensor<1xi32>, tensor<1xi8>, tensor<1xi32>, tensor<1xi8>) -> tensor<?x1x1x128xi8>
+
+  %out = tosa.reshape %out4, %out_shape : (tensor<?x1x1x128xi8>, !tosa.shape<2>) -> tensor<?x128xi8>
+  return %out : tensor<?x128xi8>
+}
+
+// The two reshape get converted to to tensor.expand_shape since are not a
+// general reshape. The conv2d is converted to a conv2d with a specific layout
+// preceded by a transpose. This is equivalent to the transposed matrix
+// multiplication that is more efficient (for cache access) in row-major layout.
+// To support broadcasting rescale is wrapped in a scf.for. For the way in which
+// linalg does things the bias is bradcased with linalg.generic to a buffer in
+// which linalg.conv_2d_nhwc_hwcf accumulates into.
+
+// INP-LABEL: module attributes {
+// INP:         util.func public @qmatmul
+// INP-SAME:    (%[[ACT:.+]]: tensor<?x128xi8>, %[[WGT:.+]]: tensor<128x128xi8>)
+// INP:           %[[CONST:.+]] = arith.constant dense<777> : tensor<128xi32>
+// INP:           %[[ACT_EXP:.+]] = tensor.expand_shape %[[ACT]]
+// INP:           %[[WGT_EXP:.+]] = tensor.expand_shape %[[WGT]]
+// INP:           %[[WGT_EXP_T:.+]] = linalg.transpose ins(%[[WGT_EXP]] : tensor<128x1x1x128xi8>)
+// INP:           %[[ACC:.+]] = linalg.generic {{{.+}}} ins(%[[CONST]] : tensor<128xi32>)
+// INP:           %{{.+}} = linalg.conv_2d_nhwc_hwcf {{{.+}}}
+// INP-SAME:      ins(%[[ACT_EXP]], %[[WGT_EXP_T]] : tensor<?x1x1x128xi8>, tensor<1x1x128x128xi8>)
+// INP-SAME:      outs(%[[ACC]] : tensor<?x1x1x128xi32>)
+// INP:           %[[RSC:.+]] = scf.for
+// INP:           %[[OUT:.+]] = tensor.collapse_shape %[[RSC]]
+// INP:           util.return %[[OUT]]
