@@ -268,6 +268,8 @@ func.func @add_big_const(%input: tensor<16xi32>) -> (tensor<16xi32>) {
   return %add : tensor<16xi32>
 }
 
+// INP-LABEL: module attributes {
+
 // FLW-LABEL: module attributes {
 // FLW:         flow.executable private @[[DISPATCH:.+]] {
 // FLW:           builtin.module {
@@ -293,7 +295,7 @@ func.func @qmatmul(%act: tensor<?x128xi8>, %wgt: tensor<128x128xi8>) -> (tensor<
   %bias = "tosa.const"() {values = dense<777> : tensor<128xi32>} : () -> tensor<128xi32>
 
   %zp_i8 = "tosa.const"() {values = dense<111> : tensor<1xi8>} : () -> tensor<1xi8>
-  %zp_i32 = "tosa.const"() {values = dense<222> : tensor<1xi32>} : () -> tensor<1xi32>
+  %zp_i32 = "tosa.const"() {values = dense<0> : tensor<1xi32>} : () -> tensor<1xi32>
   %multiplier = "tosa.const"() {values = dense<1073741824> : tensor<1xi32>} : () -> tensor<1xi32>
   %shift = "tosa.const"() {values = dense<38> : tensor<1xi8>} : () -> tensor<1xi8>
 
@@ -320,9 +322,10 @@ func.func @qmatmul(%act: tensor<?x128xi8>, %wgt: tensor<128x128xi8>) -> (tensor<
 // INP:           %[[WGT_EXP:.+]] = tensor.expand_shape %[[WGT]]
 // INP:           %[[WGT_EXP_T:.+]] = linalg.transpose ins(%[[WGT_EXP]] : tensor<128x1x1x128xi8>)
 // INP:           %[[ACC:.+]] = linalg.generic {{{.+}}} ins(%[[CONST]] : tensor<128xi32>)
-// INP:           %{{.+}} = linalg.conv_2d_nhwc_hwcf {{{.+}}}
-// INP-SAME:      ins(%[[ACT_EXP]], %[[WGT_EXP_T]] : tensor<?x1x1x128xi8>, tensor<1x1x128x128xi8>)
+// INP:           %[[CONV:.+]] = linalg.conv_2d_nhwc_hwcf_q {{{.+}}}
+// INP-SAME:      ins(%[[ACT_EXP]], %[[WGT_EXP_T]], %{{.+}}, %{{.+}} : tensor<?x1x1x128xi8>, tensor<1x1x128x128xi8>, i32, i32)
 // INP-SAME:      outs(%[[ACC]] : tensor<?x1x1x128xi32>)
 // INP:           %[[RSC:.+]] = scf.for
+// INP:             %{{.+}} = tensor.extract_slice %[[CONV]]
 // INP:           %[[OUT:.+]] = tensor.collapse_shape %[[RSC]]
 // INP:           util.return %[[OUT]]

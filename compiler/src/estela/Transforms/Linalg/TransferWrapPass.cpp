@@ -76,6 +76,10 @@ wrapInTransfers(
   Location loc = op.getLoc();
   rewriter.setInsertionPoint(op);
 
+  SmallVector<Value> dims = IREE::Util::buildDynamicDimsForValue(
+    loc, op.getDpsInitOperand(0)->get(), rewriter
+  );
+
   for (OpOperand *input : op.getDpsInputOperands()) {
     Value value = input->get();
     // A splat is folded into the op, during dispatch formation
@@ -83,9 +87,6 @@ wrapInTransfers(
     // transfer would prevent. Other constants have to arrive through a binding.
     if (isInt32Immediate(value)) continue;
 
-    SmallVector<Value> dims = IREE::Util::buildDynamicDimsForValue(
-      loc, value, rewriter
-    );
     Value transfer = IREE::Flow::TensorTransferOp::create(
       rewriter, loc, value.getType(), value, dims, strela
     );
@@ -94,7 +95,9 @@ wrapInTransfers(
 
   rewriter.setInsertionPointAfter(op);
   for (OpResult result : op->getResults()) {
-    auto back = IREE::Flow::TensorTransferOp::create(rewriter, loc, result, host);
+    auto back = IREE::Flow::TensorTransferOp::create(
+      rewriter, loc, result, dims, host
+    );
     rewriter.replaceAllUsesExcept(result, back, back);
   }
 }
