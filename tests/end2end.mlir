@@ -1,8 +1,49 @@
-// The whole Estela flow on the simplest (non trivial) program. The idea is that
-// starting from a function that uses the TOSA dialect Estela can automatically
-// partition the graph to execute on STRELA the supported operations and on CPU
-// the rest.
-// ctest --test-dir iree-build -R estela/end2end
+// Some tests meant to explain the Estela compilation flow. To run it from the
+// command line
+// $ ctest --test-dir iree-build -R estela/end2end --rerun-failed --output-on-failure
+
+// We run the compilation flow up to various points that we use in the test to
+// illustrate what is going on.
+
+// RUN: iree-compile --split-input-file --iree-plugin=estela --compile-to=input %s \
+// RUN:   | FileCheck %s --enable-var-scope --check-prefix=INP
+
+// RUN: iree-compile --split-input-file --iree-plugin=estela \
+// RUN:   --iree-hal-target-device=cpu0=local[0] \
+// RUN:   --iree-hal-target-device=strela0=strela \
+// RUN:   --iree-hal-default-device=cpu0 \
+// RUN:   --iree-hal-local-target-device-backends=vmvx \
+// RUN:   --compile-to=preprocessing %s | FileCheck %s --enable-var-scope --check-prefix=PRE
+
+// RUN: iree-compile --split-input-file --iree-plugin=estela \
+// RUN:   --iree-hal-target-device=cpu0=local[0] \
+// RUN:   --iree-hal-target-device=strela0=strela \
+// RUN:   --iree-hal-default-device=cpu0 \
+// RUN:   --iree-hal-local-target-device-backends=vmvx \
+// RUN:   --compile-to=flow %s | FileCheck %s --enable-var-scope --check-prefix=FLW
+
+// RUN: iree-compile --split-input-file --iree-plugin=estela \
+// RUN:   --iree-hal-target-device=cpu0=local[0] \
+// RUN:   --iree-hal-target-device=strela0=strela \
+// RUN:   --iree-hal-default-device=cpu0 \
+// RUN:   --iree-hal-local-target-device-backends=vmvx \
+// RUN:   --compile-to=stream %s | FileCheck %s --enable-var-scope --check-prefix=STM
+
+// RUN: iree-compile --split-input-file --iree-plugin=estela \
+// RUN:   --iree-hal-target-device=cpu0=local[0] \
+// RUN:   --iree-hal-target-device=strela0=strela \
+// RUN:   --iree-hal-default-device=cpu0 \
+// RUN:   --iree-hal-local-target-device-backends=vmvx \
+// RUN:   --compile-to=executable-targets %s | FileCheck %s --enable-var-scope --check-prefix=EXC
+
+// RUNFIXME: iree-compile --split-input-file --iree-plugin=estela \
+// RUNFIXME:   --iree-hal-target-device=cpu0=local[0] \
+// RUNFIXME:   --iree-hal-target-device=strela0=strela \
+// RUNFIXME:   --iree-hal-default-device=cpu0 \
+// RUNFIXME:   --iree-hal-local-target-device-backends=vmvx \
+// RUNFIXME:   --compile-to=vm %s %s | FileCheck %s --enable-var-scope --check-prefix=VMX
+
+// We start with arguably the simplest non-trivial function.
 
 func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
   %sum = "tosa.add"(%lhs, %rhs) : (tensor<?xi32>, tensor<?xi32>) -> tensor<?xi32>
@@ -13,16 +54,14 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // that we are using dynamic shapes makes makes it so the compilers makes some
 // shenanigans to support broadcast semantics.
 
-// RUN: iree-compile --iree-plugin=estela --compile-to=input %s \
-// RUN:   | FileCheck %s --check-prefix=INP
-
-// INP-LABEL: util.func public @add
-// INP-SAME:  (%[[LHS:.+]]: tensor<?xi32>, %[[RHS:.+]]: tensor<?xi32>)
-// INP:         %[[BCAST_LHS:.+]] = scf.if %[[LHS:.+]] -> (tensor<?xi32>) {
-// INP:         %[[BCAST_RHS:.+]] = scf.if %[[RHS:.+]] -> (tensor<?xi32>) {
-// INP:         %[[SUM:.+]] = linalg.generic {{.*}} ins(%[[BCAST_LHS]], %[[BCAST_RHS]] : tensor<?xi32>, tensor<?xi32>)
-// INP:           arith.addi
-// INP:         util.return %[[SUM]]
+// INP-LABEL: module attributes {
+// INP:         util.func public @add
+// INP-SAME:    (%[[LHS:.+]]: tensor<?xi32>, %[[RHS:.+]]: tensor<?xi32>)
+// INP:           %[[BCAST_LHS:.+]] = scf.if %[[LHS:.+]] -> (tensor<?xi32>) {
+// INP:           %[[BCAST_RHS:.+]] = scf.if %[[RHS:.+]] -> (tensor<?xi32>) {
+// INP:           %[[SUM:.+]] = linalg.generic {{.*}} ins(%[[BCAST_LHS]], %[[BCAST_RHS]] : tensor<?xi32>, tensor<?xi32>)
+// INP:             arith.addi
+// INP:           util.return %[[SUM]]
 
 // After the input has been lowered to linalg the preprocessing phase follows.
 // We now have to specify devices for executing the various operations, this
@@ -30,13 +69,6 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // topology i.e. how STRELA and the CPU can communicate. Then operations
 // supported by STRELA are wrapped in flow.tensor.transfer. For now broadcasting
 // is left outside the "STRELA region".
-
-// RUN: iree-compile --iree-plugin=estela \
-// RUN:   --iree-hal-target-device=cpu0=local[0] \
-// RUN:   --iree-hal-target-device=strela0=strela \
-// RUN:   --iree-hal-default-device=cpu0 \
-// RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --compile-to=preprocessing %s | FileCheck %s --check-prefix=PRE
 
 // PRE-LABEL: module attributes {
 // PRE-SAME:  stream.affinity.default = #hal.device.affinity<@[[CPU:[a-z0-9_]+]]>
@@ -64,13 +96,6 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // flow dialect and linalg computations are gruupped in flow.executable. For the
 // moment we do not go in more detail here...
 
-// RUN: iree-compile --iree-plugin=estela \
-// RUN:   --iree-hal-target-device=cpu0=local[0] \
-// RUN:   --iree-hal-target-device=strela0=strela \
-// RUN:   --iree-hal-default-device=cpu0 \
-// RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --compile-to=flow %s | FileCheck %s --check-prefix=FLW
-
 // FLW-LABEL: module attributes {
 // TODO: flow test
 
@@ -82,13 +107,6 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // allocation of the output buffer and a transient one that its used to copy
 // data from the CPU visible memory (two buffers are combined in one) to the
 // STRELA visible one.
-
-// RUN: iree-compile --iree-plugin=estela \
-// RUN:   --iree-hal-target-device=cpu0=local[0] \
-// RUN:   --iree-hal-target-device=strela0=strela \
-// RUN:   --iree-hal-default-device=cpu0 \
-// RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --compile-to=stream %s | FileCheck %s --check-prefix=STM
 
 // STM-LABEL: module attributes {
 // STM:         util.global private @[[CPU:.+]] = #hal.device.target<"local"
@@ -128,26 +146,20 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // the function body is still left as at the stream level.
 // TODO: make a sensible thing here...
 
-// RUN: iree-compile --iree-plugin=estela \
-// RUN:   --iree-hal-target-device=cpu0=local[0] \
-// RUN:   --iree-hal-target-device=strela0=strela \
-// RUN:   --iree-hal-default-device=cpu0 \
-// RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --compile-to=executable-targets %s | FileCheck %s --check-prefix=EXC
-
-// EXC:      %[[LHS:.+]] = strela.binding_load binding(0) : tensor<?xi32>
-// EXC:      %[[RHS:.+]] = strela.binding_load binding(0) offsets [0, 1] : tensor<?xi32>
-// EXC:      %[[SUM:.+]] = strela.add %[[LHS]], %[[RHS]] : tensor<?xi32>
-// EXC:      strela.binding_store %[[SUM]], binding(1) : tensor<?xi32>
+// EXC-LABEL: module attributes {stream.affinity.default
+// EXC:         hal.executable private @{{.+}} {
+// EXC:         hal.executable private @{{.+}} {
+// EXC:           hal.executable.variant public @{{.+}} target(<"strela", "strela_bitstream">) {
+// EXC:             builtin.module {
+// EXC:               func.func @{{.+}}() {
+// EXC:                 %[[LHS:.+]] = strela.binding_load binding(0) : tensor<?xi32>
+// EXC:                 %[[RHS:.+]] = strela.binding_load binding(0) offsets [0, 1] : tensor<?xi32>
+// EXC:                 %[[SUM:.+]] = strela.add %[[LHS]], %[[RHS]] : tensor<?xi32>
+// EXC:                 strela.binding_store %[[SUM]], binding(1) : tensor<?xi32>
 
 // Finally compilation should conclude without problems...
 
-// RUNFIXME: iree-compile --iree-plugin=estela \
-// RUNFIXME:   --iree-hal-target-device=cpu0=local[0] \
-// RUNFIXME:   --iree-hal-target-device=strela0=strela \
-// RUNFIXME:   --iree-hal-default-device=cpu0 \
-// RUNFIXME:   --iree-hal-local-target-device-backends=vmvx \
-// RUNFIXME:   %s -o /dev/null
+// TODO: VMX test. Here we need to support dynamic sizes at compile time.
 
 // On the board:
 //
@@ -171,18 +183,22 @@ func.func @bypass(%arg: tensor<?xi32>) -> (tensor<?xi32>) {
   return %arg : tensor<?xi32>
 }
 
-// INP-LABEL: module attributes {
+// INP-LABEL: module {
 
 // PRE-LABEL: module attributes {
 // PRE-NOT:     flow.tensor.transfer
 
+// FLW-LABEL: module attributes {
+
 // STM-LABEL: module attributes {
 // STM-NOT:     stream.cmd.execute
 
-// EXC-LABEL: module attributes {
+// EXC-LABEL: module attributes {stream.affinity.default
 // EXC-NOT:     hal.executable private
 // EXC:         util.func public @bypass(%[[ARG:.+]]: !hal.buffer_view) -> !hal.buffer_view
 // EXC:           util.return %[[ARG]] : !hal.buffer_view
+
+// TODO: VMX test
 
 // -----
 
@@ -197,11 +213,45 @@ func.func @relu(%input: tensor<?xi32>) -> (tensor<?xi32>) {
   return %relu : tensor<?xi32>
 }
 
+// With compile time constants there are no bradcasting shenanigans.
+
 // INP-LABEL: module attributes {
+// INP:         util.func public @relu(%[[ARG:.+]]: tensor<?xi32>) -> tensor<?xi32> {
+// INP:           %[[CST:.+]] = arith.constant dense<0> : tensor<1xi32>
+// INP-NOT:       %{{.+}} = scf.if %{{.+}} -> (tensor<?xi32>) {
+// INP:           %[[RES:.+]] = linalg.generic {{.*}} ins(%[[ARG]], %[[CST]] : tensor<?xi32>, tensor<1xi32>)
+// INP:           util.return %[[RES]]
+
+// Compile time constants do not need to be "imported" from hal.buffer_view
+// since they are already in a standard MLIR type. Also scalar constants are not
+// transferred since it will be baked in the bitstream as immediate values.
+
 // PRE-LABEL: module attributes {
+// PRE:         util.func public @relu(%{{.+}}: !hal.buffer_view) -> !hal.buffer_view
+// PRE:           %[[CST:.+]] = arith.constant dense<0> : tensor<1xi32>
+// PRE-NOT:       %{{.+}} = hal.tensor.import on(#hal.device.affinity<@{{.+}}>) %[[CST]]
+// PRE-NOT:       %{{.+}} = flow.tensor.transfer %[[CST]] : tensor<1xi32>{%{{.+}}} to #hal.device.affinity<@{{.+}}>
+
+// During dispatch creation (--compile-to=dispatch-creation) the constant is
+// copied inside the executable.
+
+// FLW-LABEL: module attributes {
+// FLW:         flow.executable private @[[DISPATCH:.+]] {
+// FLW:           builtin.module {
+// FLW:             func.func @[[DISPATCH_FUNC:.+]](
+// FLW-SAME:        %{{.+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<?xi32>>,
+// FLW-SAME:        %{{.+}}: index,
+// FLW-SAME:        %{{.+}}: !iree_tensor_ext.dispatch.tensor<writeonly:tensor<?xi32>>
+// FLW-SAME:        ) {
+// FLW:               %[[CONST:.+]] = arith.constant 0 : i32
+// FLW:               %{{.+}} = linalg.generic
+// FLW:                 %{{.+}} = arith.maxsi %{{.+}}, %[[CONST]] : i32
+// FLW:             util.func public @relu(%{{.+}}: !hal.buffer_view) {{.+}} {
+
 // STM-LABEL: module attributes {
-// EXC-LABEL: module attributes {
-// EXC: %{{.+}} = strela.relu %{{.+}} : tensor<?xi32>
+
+// EXC-LABEL: module attributes {stream.affinity.default
+// EXC:             %{{.+}} = strela.relu %{{.+}} : tensor<?xi32>
 
 // -----
 
@@ -216,3 +266,16 @@ func.func @add_big_const(%input: tensor<16xi32>) -> (tensor<16xi32>) {
   %add = "tosa.add"(%big_const, %input) : (tensor<16xi32>, tensor<16xi32>) -> tensor<16xi32>
   return %add : tensor<16xi32>
 }
+
+// FLW-LABEL: module attributes {
+// FLW:         flow.executable private @[[DISPATCH:.+]] {
+// FLW:           builtin.module {
+// FLW:             func.func @[[DISPATCH_FUNC:.+]](
+// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<16xi32>>,
+// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<16xi32>>,
+// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<writeonly:tensor<16xi32>>
+// FLW-SAME:        ) {
+// FLW:             util.global private @[[CONST_GLOB:.+]] <{{.+}}> {{{.+}}} = dense<[{{.+}}]> : tensor<16xi32>
+// FLW:             util.func public @add_big_const(%{{.+}}: !hal.buffer_view) {{.+}} {
+// FLW:               %[[CONST_LOC:.+]] = util.global.load immutable @[[CONST_GLOB]] : tensor<16xi32>
+// FLW:               %{{.+}} = flow.tensor.transfer %[[CONST_LOC]] : tensor<16xi32> to #hal.device.affinity

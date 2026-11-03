@@ -62,6 +62,7 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   // <file-name> -o /dev/null
   void
   extendPreprocessingPassPipeline(OpPassManager &passManager) override {
+    // TODO: create a pass that converts all integers smaller than int32 to int32
     passManager.addPass(estela::createAssignTopologyPass());
     // TODO(Diego): implement a pass that adds this information so that the
     // compiler prove that some dynamic sizes are the same and needs to push
