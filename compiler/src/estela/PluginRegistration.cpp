@@ -1,7 +1,6 @@
 #include "iree/compiler/Dialect/HAL/Target/TargetBackend.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetDevice.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetRegistry.h"
-#include "iree/compiler/GlobalOptimization/Passes.h"
 #include "iree/compiler/PluginAPI/Client.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -65,13 +64,6 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   extendPreprocessingPassPipeline(OpPassManager &passManager) override {
     // TODO: create a pass that converts all integers smaller than int32 to int32
     passManager.addPass(estela::createAssignTopologyPass());
-    // This pass makes it so the bias is added after a convolution operation
-    // instead of using to initialize the accumulator buffer. This does it for
-    // every operation which may be sub-optimal. It would be better to do it
-    // just for STRELA operations after dispatch creation.
-    passManager.addNestedPass<IREE::Util::FuncOp>(
-      GlobalOptimization::createDetachElementwiseFromNamedOpsPass()
-    );
     // TODO(Diego): implement a pass that adds this information so that the
     // compiler prove that some dynamic sizes are the same and needs to push
     // less constants when launching kernels.
