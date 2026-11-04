@@ -34,9 +34,10 @@ def ReluOp : Strela_Op<"relu", [Pure, SameOperandsAndResultType]> {
 //     FuseDispatchBindings produces these when it merges several operands into
 //     one buffer and every dispatch site of the executable agrees on where each
 //     one sits, so the offset folds to an `arith.constant`.
-//   * `offsets`: the two push constant ordinals carrying the low and high
-//     halves of a 64 bit offset that differs per dispatch site. Those two are
-//     not necessarily adjacent because IREE dedupes the constant loads.
+//   * `offsets`: the push constant ordinals of an offset that differs per
+//     dispatch site, either the low and high halves of a 64 bit offset or a
+//     single one when Stream proved it fits in 32 bits. The pair is not
+//     necessarily adjacent because IREE dedupes the constant loads.
 class Strela_BindingOp<string mnemonic, list<Trait> traits = []> :
     Strela_Op<mnemonic, traits>;
 

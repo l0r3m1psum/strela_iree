@@ -32,6 +32,12 @@ struct EstelaOptions {
 
 struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
 
+  // Lets iree-opt run the passes on their own, e.g. in LIT tests.
+  static void
+  registerPasses() {
+    mlir::registerPass([] { return estela::createTransferWrapPass(); });
+  }
+
   void
   extendInputConversionPreprocessingPassPipeline(
     OpPassManager &passManager, InputDialectOptions::Type inputType

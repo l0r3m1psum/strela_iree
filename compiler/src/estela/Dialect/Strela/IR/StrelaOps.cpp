@@ -7,9 +7,9 @@ namespace mlir::strela {
 static LogicalResult
 verifyBindingOffsets(Operation *op, std::optional<ArrayRef<int64_t>> offsets,
                      std::optional<uint64_t> byteOffset) {
-  if (offsets && offsets->size() != 2) {
+  if (offsets && offsets->size() != 1 && offsets->size() != 2) {
     return op->emitOpError()
-           << "expected exactly two offset ordinals, the low and high halves "
+           << "expected one offset ordinal, or two for the low and high halves "
               "of the byte offset, but got " << offsets->size();
   }
   if (offsets && byteOffset) {

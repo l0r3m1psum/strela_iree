@@ -33,6 +33,13 @@ mlir::estela::isStrelaLinalgAdd(mlir::linalg::GenericOp genericOp) {
     return mlir::failure();
   }
 
+  // The add bitstream pairs the two input columns word by word, so a broadcast
+  // operand would run out before the other one.
+  if (!llvm::all_of(genericOp.getIndexingMapsArray(),
+                    [](mlir::AffineMap map) { return map.isIdentity(); })) {
+    return mlir::failure();
+  }
+
   mlir::Block *body = genericOp.getBlock();
   if (std::distance(body->begin(), body->end()) != 2) {
     return mlir::failure();
@@ -40,6 +47,14 @@ mlir::estela::isStrelaLinalgAdd(mlir::linalg::GenericOp genericOp) {
 
   auto addOp = mlir::dyn_cast<mlir::arith::AddIOp>(&body->front());
   if (!addOp) {
+    return mlir::failure();
+  }
+
+  auto args = genericOp.getRegionInputArgs();
+  bool addsInputs =
+      (addOp.getLhs() == args[0] && addOp.getRhs() == args[1]) ||
+      (addOp.getLhs() == args[1] && addOp.getRhs() == args[0]);
+  if (!addsInputs) {
     return mlir::failure();
   }
 

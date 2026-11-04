@@ -1,7 +1,6 @@
 #include "estela/Dialect/Strela/Transforms/Passes.h"
 
 #include <optional>
-#include <utility>
 
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 #include "iree/compiler/Dialect/TensorExt/IR/TensorExtOps.h"
@@ -37,11 +36,12 @@ namespace {
 struct StrelaBinding {
   // Index into the dispatch binding list, i.e. the hal.pipeline.layout ordinal.
   uint32_t binding = 0;
-  // Push constant ordinals holding the low and high halves of the subspan byte
-  // offset, set only when that offset varies per dispatch site. The two are not
+  // Push constant ordinals holding the subspan byte offset, set only when that
+  // offset varies per dispatch site: [low, high] halves of a 64 bit offset, or
+  // a single one when Stream proved the offset fits in 32 bits. The pair is not
   // necessarily adjacent: IREE dedupes the constant loads, so two bindings whose
   // offsets share a low word also share that ordinal.
-  std::optional<std::pair<uint32_t, uint32_t>> offsets;
+  SmallVector<uint32_t, 2> offsets;
   // The subspan byte offset when it is known at compile time and non-zero,
   // which is what FuseDispatchBindings leaves behind after packing several
   // operands into one buffer.
@@ -59,12 +59,15 @@ lookThroughAssume(Value value) {
   return value;
 }
 
-// Recognizes the three forms a `hal.interface.binding.subspan` byte offset
+// Recognizes the four forms a `hal.interface.binding.subspan` byte offset
 // takes in an executable source and reports where the driver can find it:
 //   * absent or a literal zero                       -> offset is zero
 //   * any other literal                              -> that constant offset
+//   * index_castui(load LO)                          -> ordinal LO
 //   * index_castui(ori(extui(load LO),
 //                      shli(extui(load HI), 32)))    -> ordinals LO and HI
+// Stream emits the single load when util.assume.int bounds the offset below
+// 2^32, which it does for every statically known dispatch site.
 // Anything else we cannot describe to the driver, so serialization fails rather
 // than emitting a kernel that would read from the wrong address.
 //
@@ -88,7 +91,7 @@ static constexpr const char *strelaUnfusedBindingsHint =
 static LogicalResult
 matchBindingOffset(Value byteOffset, StrelaBinding &binding) {
   auto &offsets = binding.offsets;
-  offsets.reset();
+  offsets.clear();
   binding.staticByteOffset.reset();
   if (!byteOffset) return success();
 
@@ -105,6 +108,13 @@ matchBindingOffset(Value byteOffset, StrelaBinding &binding) {
 
   auto castOp = byteOffset.getDefiningOp<arith::IndexCastUIOp>();
   if (!castOp) return failure();
+
+  if (auto loadOp = lookThroughAssume(castOp.getIn())
+                      .getDefiningOp<IREE::HAL::InterfaceConstantLoadOp>()) {
+    offsets.push_back(static_cast<uint32_t>(loadOp.getOrdinal().getZExtValue()));
+    return success();
+  }
+
   auto orOp = lookThroughAssume(castOp.getIn()).getDefiningOp<arith::OrIOp>();
   if (!orOp) return failure();
 
@@ -127,10 +137,8 @@ matchBindingOffset(Value byteOffset, StrelaBinding &binding) {
     highExtOp.getIn().getDefiningOp<IREE::HAL::InterfaceConstantLoadOp>();
   if (!lowLoadOp || !highLoadOp) return failure();
 
-  offsets = std::make_pair(
-    static_cast<uint32_t>(lowLoadOp.getOrdinal().getZExtValue()),
-    static_cast<uint32_t>(highLoadOp.getOrdinal().getZExtValue())
-  );
+  offsets.push_back(static_cast<uint32_t>(lowLoadOp.getOrdinal().getZExtValue()));
+  offsets.push_back(static_cast<uint32_t>(highLoadOp.getOrdinal().getZExtValue()));
   return success();
 }
 
@@ -287,10 +295,8 @@ struct StrelaMaterializeBindingsPass
 
     OpBuilder builder(info->kernelOp);
     auto offsetsAttrOf = [&builder](const StrelaBinding &binding) {
-      if (!binding.offsets) return DenseI64ArrayAttr();
-      return builder.getDenseI64ArrayAttr(
-        {binding.offsets->first, binding.offsets->second}
-      );
+      if (binding.offsets.empty()) return DenseI64ArrayAttr();
+      return builder.getDenseI64ArrayAttr(llvm::to_vector_of<int64_t>(binding.offsets));
     };
     auto byteOffsetAttrOf = [&builder](const StrelaBinding &binding) {
       if (!binding.staticByteOffset) return IntegerAttr();

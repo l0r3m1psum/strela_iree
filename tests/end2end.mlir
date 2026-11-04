@@ -285,14 +285,17 @@ func.func @add_big_const(%input: tensor<16xi32>) -> (tensor<16xi32>) {
 
 // -----
 
-func.func @qmatmul(%act: tensor<?x128xi8>, %wgt: tensor<128x128xi8>) -> (tensor<?x128xi8>) {
-  %act_shape = tosa.const_shape values(dense<[-1, 1, 1, 128]> : tensor<4xindex>) : () -> !tosa.shape<4>
-  %wgt_shape = tosa.const_shape values(dense<[128, 1, 1, 128]> : tensor<4xindex>) : () -> !tosa.shape<4>
+// This is, strictly speaking not valid TOSA (because tosa.matmul does not
+// support int32). TOSA matmul is also necessarily a batched matrix
+// multiplication hence the reshape.
+
+func.func @matmul_bias(%act: tensor<?x128xi32>, %wgt: tensor<128x128xi32>) -> (tensor<?x128xi32>) {
+  %act_shape = tosa.const_shape values(dense<[1, -1, 128]> : tensor<3xindex>) : () -> !tosa.shape<3>
+  %wgt_shape = tosa.const_shape values(dense<[1, 128, 128]> : tensor<3xindex>) : () -> !tosa.shape<3>
   %out_shape = tosa.const_shape values(dense<[-1, 128]> : tensor<2xindex>) : () -> !tosa.shape<2>
 
-  %act4 = tosa.reshape %act, %act_shape : (tensor<?x128xi8>, !tosa.shape<4>) -> tensor<?x1x1x128xi8>
-  %wgt4 = tosa.reshape %wgt, %wgt_shape : (tensor<128x128xi8>, !tosa.shape<4>) -> tensor<128x1x1x128xi8>
-  %bias = "tosa.const"() {values = dense<[
+  %zp = "tosa.const"() {values = dense<0> : tensor<1xi32>} : () -> tensor<1xi32>
+  %bias = "tosa.const"() {values = dense<[[[
     0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xA,0xB,0xC,0xD,0xE,0xF,
     0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xA,0xB,0xC,0xD,0xE,0xF,
     0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xA,0xB,0xC,0xD,0xE,0xF,
@@ -301,40 +304,34 @@ func.func @qmatmul(%act: tensor<?x128xi8>, %wgt: tensor<128x128xi8>) -> (tensor<
     0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xA,0xB,0xC,0xD,0xE,0xF,
     0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xA,0xB,0xC,0xD,0xE,0xF,
     0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xA,0xB,0xC,0xD,0xE,0xF
-  ]> : tensor<128xi32>} : () -> tensor<128xi32>
+  ]]]> : tensor<1x1x128xi32>} : () -> tensor<1x1x128xi32>
 
-  %zp_i8 = "tosa.const"() {values = dense<111> : tensor<1xi8>} : () -> tensor<1xi8>
-  %zp_i32 = "tosa.const"() {values = dense<0> : tensor<1xi32>} : () -> tensor<1xi32>
-  %multiplier = "tosa.const"() {values = dense<1073741824> : tensor<1xi32>} : () -> tensor<1xi32>
-  %shift = "tosa.const"() {values = dense<38> : tensor<1xi8>} : () -> tensor<1xi8>
+  %act3 = tosa.reshape %act, %act_shape : (tensor<?x128xi32>, !tosa.shape<3>) -> tensor<1x?x128xi32>
+  %wgt3 = tosa.reshape %wgt, %wgt_shape : (tensor<128x128xi32>, !tosa.shape<3>) -> tensor<1x128x128xi32>
 
-  %acc4 = tosa.conv2d %act4, %wgt4, %bias, %zp_i8, %zp_i8 pad([0, 0, 0, 0]) stride([1, 1]) dilation([1, 1]) acc_type(i32) : (tensor<?x1x1x128xi8>, tensor<128x1x1x128xi8>, tensor<128xi32>, tensor<1xi8>, tensor<1xi8>) -> tensor<?x1x1x128xi32>
-  %out4 = tosa.rescale %acc4, %multiplier, %shift, %zp_i32, %zp_i8 scale32(true) rounding_mode<DOUBLE_ROUND> per_channel(false) input_unsigned(false) output_unsigned(false) : (tensor<?x1x1x128xi32>, tensor<1xi32>, tensor<1xi8>, tensor<1xi32>, tensor<1xi8>) -> tensor<?x1x1x128xi8>
+  %wgt3_t = tosa.transpose %wgt3 perms([0, 2, 1]) : (tensor<1x128x128xi32>) -> tensor<1x128x128xi32>
+  %acc3 = tosa.matmul %act3, %wgt3_t, %zp, %zp : (tensor<1x?x128xi32>, tensor<1x128x128xi32>, tensor<1xi32>, tensor<1xi32>) -> tensor<1x?x128xi32>
+  %out3 = tosa.add %acc3, %bias : (tensor<1x?x128xi32>, tensor<1x1x128xi32>) -> tensor<1x?x128xi32>
 
-  %out = tosa.reshape %out4, %out_shape : (tensor<?x1x1x128xi8>, !tosa.shape<2>) -> tensor<?x128xi8>
-  return %out : tensor<?x128xi8>
+  %out = tosa.reshape %out3, %out_shape : (tensor<1x?x128xi32>, !tosa.shape<2>) -> tensor<?x128xi32>
+  return %out : tensor<?x128xi32>
 }
 
-// The two reshape get converted to to tensor.expand_shape since are not a
-// general reshape. The conv2d is converted to a conv2d with a specific layout
-// preceded by a transpose. This is equivalent to the transposed matrix
-// multiplication that is more efficient (for cache access) in row-major layout.
-// To support broadcasting rescale is wrapped in a scf.for. For the way in which
-// linalg does things the bias is bradcased with linalg.generic to a buffer in
-// which linalg.conv_2d_nhwc_hwcf accumulates into.
+// The three reshape get converted to to tensor.{expand_shape,collapse_shape}
+// since are not a general reshapes. The linalg.fill is used to initialize the
+// accumulator of linalg.batch_matmul (this is required by the linalg semantics)
+// other operations like convolution initialize the accumlator with the bias.
 
 // INP-LABEL: module attributes {
-// INP:         util.func public @qmatmul
-// INP-SAME:    (%[[ACT:.+]]: tensor<?x128xi8>, %[[WGT:.+]]: tensor<128x128xi8>)
-// INP:           %[[CONST:.+]] = arith.constant dense<{{.+}}> : tensor<128xi32>
+// INP:         util.func public @matmul_bias
+// INP-SAME:    (%[[ACT:.+]]: tensor<?x128xi32>, %[[WGT:.+]]: tensor<128x128xi32>)
+// INP:           %[[BIAS:.+]] = arith.constant dense<{{.+}}> : tensor<1x1x128xi32>
 // INP:           %[[ACT_EXP:.+]] = tensor.expand_shape %[[ACT]]
 // INP:           %[[WGT_EXP:.+]] = tensor.expand_shape %[[WGT]]
-// INP:           %[[WGT_EXP_T:.+]] = linalg.transpose ins(%[[WGT_EXP]] : tensor<128x1x1x128xi8>)
-// INP:           %[[ACC:.+]] = linalg.generic {{{.+}}} ins(%[[CONST]] : tensor<128xi32>)
-// INP:           %[[CONV:.+]] = linalg.conv_2d_nhwc_hwcf_q {{{.+}}}
-// INP-SAME:      ins(%[[ACT_EXP]], %[[WGT_EXP_T]], %{{.+}}, %{{.+}} : tensor<?x1x1x128xi8>, tensor<1x1x128x128xi8>, i32, i32)
-// INP-SAME:      outs(%[[ACC]] : tensor<?x1x1x128xi32>)
-// INP:           %[[RSC:.+]] = scf.for
-// INP:             %{{.+}} = tensor.extract_slice %[[CONV]]
-// INP:           %[[OUT:.+]] = tensor.collapse_shape %[[RSC]]
+// INP:           %[[WGT_T:.+]] = linalg.transpose ins(%[[WGT_EXP]] : tensor<1x128x128xi32>) {{.+}} permutation = [0, 2, 1]
+// INP:           %[[ZERO:.+]] = linalg.fill
+// INP:           %[[MM:.+]] = linalg.batch_matmul ins(%[[ACT_EXP]], %[[WGT_T]] : tensor<1x?x128xi32>, tensor<1x128x128xi32>) outs(%[[ZERO]] : tensor<1x?x128xi32>)
+// INP:           %[[ADD:.+]] = linalg.generic {{.+}} affine_map<(d0, d1, d2) -> (d0, 0, d2)>{{.+}} ins(%[[MM]], %[[BIAS]] : tensor<1x?x128xi32>, tensor<1x1x128xi32>)
+// INP:             arith.addi
+// INP:           %[[OUT:.+]] = tensor.collapse_shape %[[ADD]]
 // INP:           util.return %[[OUT]]

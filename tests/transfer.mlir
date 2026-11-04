@@ -21,6 +21,11 @@
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --compile-to=executable-targets %s | FileCheck %s --check-prefix=UNFUSED
 
+// The work meant for device_a is a sub and a minimum, which STRELA has no kernel
+// for: an add or a ReLU would be moved to device_b by TransferWrapPass as well,
+// and the STRELA executables would then be dispatched from several sites, each
+// with its own offsets (that case is variant 3).
+
 // Variant 1: the topology says the two devices share memory, so the transfers
 // need no staging buffers, each operand keeps its own binding and every subspan
 // starts at byte zero.
@@ -63,19 +68,19 @@ module attributes {
     %i2_b = flow.tensor.transfer %i2 : tensor<8x9xi32> to #hal.device.promise<@device_b>
     %i3_b = flow.tensor.transfer %i3 : tensor<8x9xi32> to #hal.device.promise<@device_b>
 
-    %a0 = "tosa.add"(%i0, %i1) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
+    %a0 = tosa.sub %i0, %i1 : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
     %a1_b = "tosa.add"(%i2_b, %i3_b) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
 
     %a1_barrier = util.optimization_barrier %a1_b : tensor<8x9xi32>
 
-    %r0 = tosa.maximum %a0, %zero : (tensor<8x9xi32>, tensor<1x1xi32>) -> tensor<8x9xi32>
+    %r0 = tosa.minimum %a0, %zero : (tensor<8x9xi32>, tensor<1x1xi32>) -> tensor<8x9xi32>
     %r1_b = tosa.maximum %a1_barrier, %zero : (tensor<8x9xi32>, tensor<1x1xi32>) -> tensor<8x9xi32>
 
     // No barrier needed here: the transfer back to device_a is already a fusion
     // boundary, as is the transfer of %i2/%i3 above.
     %r1 = flow.tensor.transfer %r1_b : tensor<8x9xi32> to #hal.device.promise<@device_a>
 
-    %a2 = "tosa.add"(%r0, %r1) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
+    %a2 = tosa.sub %r0, %r1 : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
 
     %flattened = tosa.reshape %a2, %new_shape : (tensor<8x9xi32>, !tosa.shape<1>) -> tensor<72xi32>
     %min_tensor = tosa.reduce_min %flattened axis(0) : (tensor<72xi32>) -> tensor<1xi32>
@@ -120,21 +125,53 @@ module {
     %i2_b = flow.tensor.transfer %i2 : tensor<8x9xi32> to #hal.device.promise<@device_b>
     %i3_b = flow.tensor.transfer %i3 : tensor<8x9xi32> to #hal.device.promise<@device_b>
 
-    %a0 = "tosa.add"(%i0, %i1) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
+    %a0 = tosa.sub %i0, %i1 : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
     %a1_b = "tosa.add"(%i2_b, %i3_b) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
 
     %a1_barrier = util.optimization_barrier %a1_b : tensor<8x9xi32>
 
-    %r0 = tosa.maximum %a0, %zero : (tensor<8x9xi32>, tensor<1x1xi32>) -> tensor<8x9xi32>
+    %r0 = tosa.minimum %a0, %zero : (tensor<8x9xi32>, tensor<1x1xi32>) -> tensor<8x9xi32>
     %r1_b = tosa.maximum %a1_barrier, %zero : (tensor<8x9xi32>, tensor<1x1xi32>) -> tensor<8x9xi32>
 
     %r1 = flow.tensor.transfer %r1_b : tensor<8x9xi32> to #hal.device.promise<@device_a>
 
-    %a2 = "tosa.add"(%r0, %r1) : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
+    %a2 = tosa.sub %r0, %r1 : (tensor<8x9xi32>, tensor<8x9xi32>) -> tensor<8x9xi32>
 
     %flattened = tosa.reshape %a2, %new_shape : (tensor<8x9xi32>, !tosa.shape<1>) -> tensor<72xi32>
     %min_tensor = tosa.reduce_min %flattened axis(0) : (tensor<72xi32>) -> tensor<1xi32>
     %min_scalar = tensor.extract %min_tensor[%c0] : tensor<1xi32>
     return %min_scalar : i32
+  }
+}
+
+// -----
+
+// Variant 3: TransferWrapPass places both adds on device_b and they share one
+// executable. FuseDispatchBindings packs the operands of the two dispatch sites
+// at different offsets, so the offsets reach the kernel as push constants. Each
+// is a single i32 constant because Stream proved it fits in 32 bits.
+//
+// CHECK: hal.executable.variant public @strela_bitstream
+// CHECK:   func.func @main_dispatch_{{[0-9]+}}
+// CHECK:     %[[S_LHS:.+]] = strela.binding_load binding(0) offsets [{{[0-9]+}}] : tensor<72xi32>
+// CHECK:     %[[S_RHS:.+]] = strela.binding_load binding(0) offsets [{{[0-9]+}}] : tensor<72xi32>
+// CHECK:     %[[S_SUM:.+]] = strela.add %[[S_LHS]], %[[S_RHS]] : tensor<72xi32>
+// CHECK:     strela.binding_store %[[S_SUM]], binding(1) offsets [{{[0-9]+}}] : tensor<72xi32>
+
+// UNFUSED: hal.executable.variant public @strela_bitstream
+// UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
+// UNFUSED:     %[[W_LHS:.+]] = strela.binding_load binding(0) : tensor<72xi32>
+// UNFUSED:     %[[W_RHS:.+]] = strela.binding_load binding(1) : tensor<72xi32>
+// UNFUSED:     %[[W_SUM:.+]] = strela.add %[[W_LHS]], %[[W_RHS]] : tensor<72xi32>
+// UNFUSED:     strela.binding_store %[[W_SUM]], binding(2) : tensor<72xi32>
+
+module {
+  func.func @main(
+    %i0: tensor<72xi32>, %i1: tensor<72xi32>, %i2: tensor<72xi32>, %i3: tensor<72xi32>
+  ) -> tensor<72xi32> {
+    %a0 = tosa.add %i0, %i1 : (tensor<72xi32>, tensor<72xi32>) -> tensor<72xi32>
+    %a1 = tosa.add %i2, %i3 : (tensor<72xi32>, tensor<72xi32>) -> tensor<72xi32>
+    %d = tosa.sub %a0, %a1 : (tensor<72xi32>, tensor<72xi32>) -> tensor<72xi32>
+    return %d : tensor<72xi32>
   }
 }

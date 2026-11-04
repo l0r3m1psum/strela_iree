@@ -260,18 +260,17 @@ iree_hal_strela_column_resolve(
   }
   iree_hal_buffer_ref_t ref = bindings.values[binding];
 
-  // Compile-time part, then the [low, high] push constants of a runtime one.
+  // Compile-time part, then the [offset] or [low, high] push constants of a
+  // runtime one.
   uint64_t byte_offset = iree_hal_strela_ColumnDef_byte_offset_get(def);
   flatbuffers_uint32_vec_t ordinals = iree_hal_strela_ColumnDef_offset_constants_get(def);
-  if (flatbuffers_uint32_vec_len(ordinals) == 2) {
-    const uint32_t *values = (const uint32_t *)constants.data;
-    size_t lo = flatbuffers_uint32_vec_at(ordinals, 0);
-    size_t hi = flatbuffers_uint32_vec_at(ordinals, 1);
-    if ((hi + 1) * sizeof(uint32_t) > constants.data_length
-        || (lo + 1) * sizeof(uint32_t) > constants.data_length) {
+  const uint32_t *values = (const uint32_t *)constants.data;
+  for (size_t i = 0; i < flatbuffers_uint32_vec_len(ordinals); ++i) {
+    size_t ordinal = flatbuffers_uint32_vec_at(ordinals, i);
+    if ((ordinal + 1) * sizeof(uint32_t) > constants.data_length) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "missing push constants");
     }
-    byte_offset += (uint64_t)values[lo] | (uint64_t)values[hi] << 32;
+    byte_offset += (uint64_t)values[ordinal] << (32 * i);
   }
 
   // An input reads one word in every `stride`, the first one repeatedly for 0.

@@ -20,28 +20,6 @@ using namespace mlir::iree_compiler;
 
 namespace {
 
-// TODO(Diego): This is unused and should be merged with the one in
-// KernelMatchers.cpp that does a slightly different thing.
-static bool
-isStrelaAdd(linalg::GenericOp op) {
-  if (!linalg::isaElemwiseSingleBinaryOpInterface(op)) return false;
-  if (!llvm::all_of(op.getIndexingMapsArray(),
-                    [](AffineMap map) { return map.isIdentity(); })) {
-    return false;
-  }
-
-  auto addOp = dyn_cast<arith::AddIOp>(op.getBody()->front());
-  if (!addOp) return false;
-  auto args = op.getRegionInputArgs();
-  bool addsInputs =
-      (addOp.getLhs() == args[0] && addOp.getRhs() == args[1]) ||
-      (addOp.getLhs() == args[1] && addOp.getRhs() == args[0]);
-  if (!addsInputs) return false;
-
-  auto type = dyn_cast<RankedTensorType>(op.getResultTypes()[0]);
-  return type && type.getElementType().isInteger(32);
-}
-
 // Affinity of the !hal.device global whose target is STRELA, so the pass
 // does not depend on what the device is called on the command line.
 // util.global private @device_b = #hal.device.target<"strela", {...}, [#hal.executable.target<"strela", "strela_bitstream">]> : !hal.device
@@ -76,9 +54,15 @@ wrapInTransfers(
   Location loc = op.getLoc();
   rewriter.setInsertionPoint(op);
 
-  SmallVector<Value> dims = IREE::Util::buildDynamicDimsForValue(
-    loc, op.getDpsInitOperand(0)->get(), rewriter
-  );
+  // The transfers back need the result's dynamic dims. Building them from the
+  // result itself may create problems.
+  // A result has its tied init's shape, so take the dims from the init.
+  SmallVector<SmallVector<Value>> resultDims;
+  for (OpOperand &init : op.getDpsInitsMutable()) {
+    resultDims.push_back(
+      IREE::Util::buildDynamicDimsForValue(loc, init.get(), rewriter)
+    );
+  }
 
   for (OpOperand *input : op.getDpsInputOperands()) {
     Value value = input->get();
@@ -87,6 +71,8 @@ wrapInTransfers(
     // transfer would prevent. Other constants have to arrive through a binding.
     if (isInt32Immediate(value)) continue;
 
+    SmallVector<Value> dims =
+      IREE::Util::buildDynamicDimsForValue(loc, value, rewriter);
     Value transfer = IREE::Flow::TensorTransferOp::create(
       rewriter, loc, value.getType(), value, dims, strela
     );
@@ -96,7 +82,7 @@ wrapInTransfers(
   rewriter.setInsertionPointAfter(op);
   for (OpResult result : op->getResults()) {
     auto back = IREE::Flow::TensorTransferOp::create(
-      rewriter, loc, result, dims, host
+      rewriter, loc, result, resultDims[result.getResultNumber()], host
     );
     rewriter.replaceAllUsesExcept(result, back, back);
   }

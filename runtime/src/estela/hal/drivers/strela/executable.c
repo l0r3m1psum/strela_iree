@@ -52,8 +52,8 @@ iree_hal_strela_column_verify(
   }
   flatbuffers_uint32_vec_t constants = iree_hal_strela_ColumnDef_offset_constants_get(column);
   size_t constants_len = flatbuffers_uint32_vec_len(constants);
-  if (constants_len != 0 && constants_len != 2) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "a runtime offset takes two constants");
+  if (constants_len > 2) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "a runtime offset takes one or two constants");
   }
   for (size_t i = 0; i < constants_len; ++i) {
     if (flatbuffers_uint32_vec_at(constants, i) >= constant_count) {
