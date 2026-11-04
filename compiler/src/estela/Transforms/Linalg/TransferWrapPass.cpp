@@ -49,7 +49,7 @@ isInt32Immediate(Value value) {
 
 static void
 wrapInTransfers(
-  RewriterBase &rewriter, linalg::GenericOp op, Attribute strela, Attribute host
+  RewriterBase &rewriter, linalg::LinalgOp op, Attribute strela, Attribute host
 ) {
   Location loc = op.getLoc();
   rewriter.setInsertionPoint(op);
@@ -59,6 +59,13 @@ wrapInTransfers(
   // A result has its tied init's shape, so take the dims from the init.
   SmallVector<SmallVector<Value>> resultDims;
   for (OpOperand &init : op.getDpsInitsMutable()) {
+    // For STRELA it is almost never efficient to "accumulate" in the output
+    // buffer like it is done in linalg.conv_2d. Hence if we use the init it
+    // has to be when it is filled with a uniform value that dispatch creation
+    // folds inside.
+    assert(!op.payloadUsesValueFromOperand(&init) ||
+         init.get().getDefiningOp<linalg::FillOp>());
+
     resultDims.push_back(
       IREE::Util::buildDynamicDimsForValue(loc, init.get(), rewriter)
     );
@@ -133,13 +140,13 @@ struct TransferWrapPass
     // for not it is good enough.
     pinAbiToDefaultDevice(funcOp);
 
-    SmallVector<linalg::GenericOp> candidates;
-    funcOp.walk([&](linalg::GenericOp op) {
+    SmallVector<linalg::LinalgOp> candidates;
+    funcOp.walk([&](linalg::LinalgOp op) {
       if (estela::isSupportedByStrela(op)) candidates.push_back(op);
     });
 
     IRRewriter rewriter(&getContext());
-    for (linalg::GenericOp op : candidates) {
+    for (linalg::LinalgOp op : candidates) {
       auto host = IREE::Stream::AffinityAttr::lookupOrDefault(op);
       if (!host) continue;
       wrapInTransfers(rewriter, op, strela, host);

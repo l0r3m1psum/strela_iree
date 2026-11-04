@@ -16,7 +16,11 @@ LogicalResult isStrelaLinalgAdd(linalg::GenericOp genericOp);
 // form tosa.maximum lowers to and the one-operand form canonicalization leaves.
 LogicalResult isStrelaLinalgRelu(linalg::GenericOp genericOp);
 
-bool isSupportedByStrela(linalg::GenericOp genericOp);
+// A single-batch i32 linalg.batch_matmul with static C and F, accumulating into
+// a zero fill.
+LogicalResult isStrelaLinalgMatvec(linalg::BatchMatmulOp op);
+
+bool isSupportedByStrela(linalg::LinalgOp linalgOp);
 
 } // namespace mlir::estela
 
