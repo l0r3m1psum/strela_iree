@@ -23,55 +23,6 @@ using namespace mlir::iree_compiler;
 
 namespace mlir::estela {
 
-//===--------------------------------------------------------------------===//
-// StrelaTargetBackend
-//===--------------------------------------------------------------------===//
-
-std::string StrelaTargetBackend::getLegacyDefaultDeviceID() const {
-  return "strela";
-}
-
-void StrelaTargetBackend::getDependentDialects(DialectRegistry &registry) const {
-  registry.insert<strela::StrelaDialect>();
-}
-
-void StrelaTargetBackend::buildTranslationPassPipeline(
-  iree_compiler::IREE::HAL::ExecutableTargetAttr executableTargetAttr,
-  OpPassManager &passManager
-) {
-  OpPassManager &modulePassManager = passManager.nest<ModuleOp>();
-
-  modulePassManager.addNestedPass<func::FuncOp>(
-    estela::createConvertLinalgToStrelaPass()
-  );
-
-  // Resolve the dispatch interface while the full executable source is still
-  // around, and leave the answer in the IR as strela.binding_load/store.
-  modulePassManager.addNestedPass<func::FuncOp>(
-    estela::createMaterializeBindingsPass()
-  );
-
-  passManager.addPass(estela::createResolveWorkgroupCountPass());
-}
-
-// TODO: how does this relate to StrelaTargetDevice::getDefaultDeviceTarget?
-// Can some code between the two be reused?
-void StrelaTargetBackend::getDefaultExecutableTargets(
-  MLIRContext *context,
-  StringRef deviceID,
-  DictionaryAttr deviceConfigAttr,
-  SmallVectorImpl<iree_compiler::IREE::HAL::ExecutableTargetAttr> &executableTargetAttrs
-) const {
-  Builder b(context);
-  SmallVector<NamedAttribute> configItems;
-
-  auto executableTargetAttr = b.getAttr<iree_compiler::IREE::HAL::ExecutableTargetAttr>(
-    b.getStringAttr("strela"), b.getStringAttr("strela_bitstream"),
-    b.getDictionaryAttr(configItems)
-  );
-  executableTargetAttrs.push_back(executableTargetAttr);
-}
-
 // The DMA programme of one CGRA column, before it is written out.
 struct StrelaColumn {
   uint32_t binding = 0;
@@ -85,9 +36,8 @@ struct StrelaColumn {
 // driver rejects anything larger.
 static constexpr int64_t strelaMaxColumnWords = 0xFFFF / sizeof(uint32_t);
 
-template <typename BindingOp>
-static FailureOr<StrelaColumn> getColumn(BindingOp op, TensorType type,
-                                         uint32_t stride) {
+template <typename BindingOp> static FailureOr<StrelaColumn>
+getColumn(BindingOp op, TensorType type, uint32_t stride) {
   if (!type.hasStaticShape()) {
     return op.emitOpError("STRELA needs a static shape, got ") << type;
   }
@@ -117,7 +67,8 @@ struct StrelaExport {
   std::array<StrelaColumn, 4> outputs;
 };
 
-static FailureOr<StrelaExport> getExport(func::FuncOp funcOp) {
+static FailureOr<StrelaExport>
+getExport(func::FuncOp funcOp) {
   SmallVector<Operation *> kernelOps;
   funcOp.walk([&](Operation *op) {
     if (isa<strela::AddOp, strela::ReluOp, strela::MatvecOp>(op)) {
@@ -186,7 +137,61 @@ createColumns(FlatbufferBuilder &builder, ArrayRef<StrelaColumn> columns) {
   return builder.createOffsetVecDestructive(refs);
 }
 
-LogicalResult StrelaTargetBackend::serializeExecutable(
+//===--------------------------------------------------------------------===//
+// StrelaTargetBackend
+//===--------------------------------------------------------------------===//
+
+std::string
+StrelaTargetBackend::getLegacyDefaultDeviceID() const {
+  return "strela";
+}
+
+void
+StrelaTargetBackend::getDependentDialects(DialectRegistry &registry) const {
+  registry.insert<strela::StrelaDialect>();
+}
+
+void
+StrelaTargetBackend::buildTranslationPassPipeline(
+  IREE::HAL::ExecutableTargetAttr executableTargetAttr,
+  OpPassManager &passManager
+) {
+  OpPassManager &modulePassManager = passManager.nest<ModuleOp>();
+
+  modulePassManager.addNestedPass<func::FuncOp>(
+    estela::createConvertLinalgToStrelaPass()
+  );
+
+  passManager.addPass(estela::createResolveWorkgroupCountPass());
+
+  // Resolve the dispatch interface while the full executable source is still
+  // around, and leave the answer in the IR as strela.binding_load/store.
+  modulePassManager.addNestedPass<func::FuncOp>(
+    estela::createMaterializeBindingsPass()
+  );
+}
+
+// TODO: how does this relate to StrelaTargetDevice::getDefaultDeviceTarget?
+// Can some code between the two be reused?
+void
+StrelaTargetBackend::getDefaultExecutableTargets(
+  MLIRContext *context,
+  StringRef deviceID,
+  DictionaryAttr deviceConfigAttr,
+  SmallVectorImpl<IREE::HAL::ExecutableTargetAttr> &executableTargetAttrs
+) const {
+  Builder b(context);
+  SmallVector<NamedAttribute> configItems;
+
+  auto executableTargetAttr = b.getAttr<IREE::HAL::ExecutableTargetAttr>(
+    b.getStringAttr("strela"), b.getStringAttr("strela_bitstream"),
+    b.getDictionaryAttr(configItems)
+  );
+  executableTargetAttrs.push_back(executableTargetAttr);
+}
+
+LogicalResult
+StrelaTargetBackend::serializeExecutable(
   const SerializationOptions &options,
   IREE::HAL::ExecutableVariantOp variantOp,
   OpBuilder &executableBuilder
@@ -259,7 +264,8 @@ LogicalResult StrelaTargetBackend::serializeExecutable(
 // StrelaTargetDevice
 //===--------------------------------------------------------------------===//
 
-iree_compiler::IREE::HAL::DeviceTargetAttr StrelaTargetDevice::getDefaultDeviceTarget(
+IREE::HAL::DeviceTargetAttr
+StrelaTargetDevice::getDefaultDeviceTarget(
   MLIRContext *context,
   const IREE::HAL::TargetRegistry &targetRegistry
 ) const {
@@ -290,7 +296,7 @@ iree_compiler::IREE::HAL::DeviceTargetAttr StrelaTargetDevice::getDefaultDeviceT
   // With
   // iree-compile --iree-plugin=estela  --iree-hal-target-device=strela --compile-to=hal 3rdparty/iree/samples/models/simple_abs.mlir   -o simple_abs_hal.mlir
   // this #hal.executable.target appears in the MLIR source.
-  auto executableTargetAttr = b.getAttr<iree_compiler::IREE::HAL::ExecutableTargetAttr>(
+  auto executableTargetAttr = b.getAttr<IREE::HAL::ExecutableTargetAttr>(
     /*backend=*/ deviceID,
     /*format=*/ b.getStringAttr("strela_bitstream"),
     /*configuration=*/ b.getDictionaryAttr({})
