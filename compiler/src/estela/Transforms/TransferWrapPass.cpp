@@ -25,6 +25,7 @@ using namespace mlir::iree_compiler;
 
 namespace {
 
+// TODO(Diego): check if this function is not already in Utils.
 // Affinity of the !hal.device global whose target is STRELA, so the pass
 // does not depend on what the device is called on the command line.
 // util.global private @device_b = #hal.device.target<"strela", {...}, [#hal.executable.target<"strela", "strela_bitstream">]> : !hal.device

@@ -154,17 +154,17 @@ StrelaTargetBackend::buildTranslationPassPipeline(
   IREE::HAL::ExecutableTargetAttr executableTargetAttr,
   OpPassManager &passManager
 ) {
-  OpPassManager &modulePassManager = passManager.nest<ModuleOp>();
-
-  modulePassManager.addNestedPass<func::FuncOp>(
+  passManager.nest<ModuleOp>().addNestedPass<func::FuncOp>(
     estela::createConvertLinalgToStrelaPass()
   );
 
+  // Needs the workload ordinals MaterializeBindings erases. A second nest,
+  // because adding to the first module pipeline would run before this.
   passManager.addPass(estela::createResolveWorkgroupCountPass());
 
   // Resolve the dispatch interface while the full executable source is still
   // around, and leave the answer in the IR as strela.binding_load/store.
-  modulePassManager.addNestedPass<func::FuncOp>(
+  passManager.nest<ModuleOp>().addNestedPass<func::FuncOp>(
     estela::createMaterializeBindingsPass()
   );
 }

@@ -61,11 +61,13 @@ def MaterializeBindingsPass
 def ResolveWorkgroupCountPass
     : Pass<"iree-strela-resolve-workgroup-count",
            "mlir::iree_compiler::IREE::HAL::ExecutableVariantOp"> {
-  let summary = "Replaces STRELA export workgroup count regions with (1, 1, 1)";
+  let summary = "Replaces STRELA export workgroup count regions with the kernel's grid";
   let description = [{
     Replaces the iree_tensor_ext.dispatch.workgroup_count_from_slice
-    placeholder of every export with a constant (1, 1, 1): a STRELA kernel
-    always runs as a single unit of work.
+    placeholder of every export with the grid STRELA runs the kernel on:
+    (1, 1, 1) for elementwise kernels, (ceildiv(F, 3), N, 1) for a matvec.
+    Must run before MaterializeBindings, which erases the workload ordinals
+    that say which count region argument is N.
   }];
 }
 

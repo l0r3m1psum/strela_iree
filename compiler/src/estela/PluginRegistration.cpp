@@ -16,22 +16,13 @@ using namespace mlir::iree_compiler;
 namespace {
 
 struct EstelaOptions {
-  bool enable_fusion = false;
-  bool partition = false;
   void bindOptions(OptionsBinder& binder) {
-    static llvm::cl::OptionCategory category("IREE STRELA Plugin");
-    binder.opt<bool>(
-      "iree-estela-fusion",
-      enable_fusion,
-      llvm::cl::desc("Enable the custom centered-gemm fusion"),
-      llvm::cl::cat(category)
-    );
+    return;
   }
 };
 
 struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
 
-  // Lets iree-opt run the passes on their own, e.g. in LIT tests.
   static void
   registerPasses() {
     estela::registerEstelaPasses();
@@ -49,14 +40,9 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   extendCustomInputConversionPassPipeline(
     OpPassManager& passManager, std::string_view typeMnemonic
   ) override {
-    // FIXME(Diego): this should not be here but in extendPreprocessingPassPipeline
     // This pass should be used just to convert from things like
     // typeMnemonic=="stablehlo"
     bool extensionsWereMade = false;
-    if (options.enable_fusion) {
-      passManager.addNestedPass<func::FuncOp>(estela::createFuseConv2DPass());
-      extensionsWereMade = true;
-    }
     return extensionsWereMade;
   }
 

@@ -7,6 +7,7 @@ iree_lit_test_suite(
   NAME
     lit
   SRCS
+    "resolve_workgroup_count.mlir"
     "transfer_wrap.mlir"
   TOOLS
     FileCheck
