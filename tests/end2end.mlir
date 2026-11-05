@@ -41,7 +41,10 @@
 // RUNFIXME:   --iree-hal-target-device=strela0=strela \
 // RUNFIXME:   --iree-hal-default-device=cpu0 \
 // RUNFIXME:   --iree-hal-local-target-device-backends=vmvx \
-// RUNFIXME:   --compile-to=vm %s %s | FileCheck %s --enable-var-scope --check-prefix=VMX
+// RUNFIXME:   --compile-to=hal %s %s | FileCheck %s --enable-var-scope --check-prefix=HAL
+
+// TODO: --compile-to=hal shows how the work is divided between workgroups
+// hal.command_buffer.dispatch<%cmd : !hal.command_buffer> {{.+}} workgroups([%c1, %c1, %c1])
 
 // We start with arguably the simplest non-trivial function.
 
@@ -160,7 +163,7 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 
 // Finally compilation should conclude without problems...
 
-// TODO: VMX test. Here we need to support dynamic sizes at compile time.
+// TODO: HAL test. Here we need to support dynamic sizes at compile time.
 
 // On the board:
 //
@@ -199,7 +202,7 @@ func.func @bypass(%arg: tensor<?xi32>) -> (tensor<?xi32>) {
 // EXC:         util.func public @bypass(%[[ARG:.+]]: !hal.buffer_view) -> !hal.buffer_view
 // EXC:           util.return %[[ARG]] : !hal.buffer_view
 
-// TODO: VMX test
+// TODO: HAL test
 
 // -----
 
