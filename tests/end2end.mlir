@@ -342,10 +342,10 @@ func.func @matmul_bias(%act: tensor<?x128xi32>, %wgt: tensor<128x128xi32>) -> (t
 // PRE-LABEL: module attributes {
 // PRE:          util.func public @matmul_bias
 // PRE:            %[[ACC:.+]] = linalg.fill
-// PRE:            %[[INP:.+]] = flow.tensor.transfer
+// PRE:            %[[LHS:.+]] = flow.tensor.transfer
 // PRE:            %[[WGT:.+]] = flow.tensor.transfer
 // PRE:            %[[OUT:.+]] = linalg.batch_matmul
-// PRE-SAME:       ins(%[[INP]], %[[WGT]] : tensor<1x?x128xi32>, tensor<1x128x128xi32>)
+// PRE-SAME:       ins(%[[LHS]], %[[WGT]] : tensor<1x?x128xi32>, tensor<1x128x128xi32>)
 // PRE-SAME:       outs(%[[ACC]] : tensor<1x?x128xi32>) -> tensor<1x?x128xi32>
 // PRE:            %{{.+}} = flow.tensor.transfer %[[OUT]]
 
@@ -360,3 +360,6 @@ func.func @matmul_bias(%act: tensor<?x128xi32>, %wgt: tensor<128x128xi32>) -> (t
 // FLW:               outs(%[[ACC]] : tensor<1x?x128xi32>) -> tensor<1x?x128xi32>
 // FLW:         flow.executable private @[[BIAS_DISPATCH:.+]] {
 // FLW:         util.global private @{{.+}}
+
+// EXC-LABEL: module attributes {stream.affinity.default
+// EXC:               %{{.+}} = strela.matvec %{{.+}}, %{{.+}} :

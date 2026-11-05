@@ -23,6 +23,25 @@ def ReluOp : Strela_Op<"relu", [Pure, SameOperandsAndResultType]> {
   }];
 }
 
+def MatvecOp : Strela_Op<"matvec", [Pure]> {
+  let summary = "Batched matrix multiplication with a zero accumulator";
+  let description = [{
+    `result[0, n, f] = sum_c lhs[0, n, c] * rhs[0, c, f]`, i.e. a
+    `linalg.batch_matmul` with a batch of one whose init is a zero fill. The
+    kernel has no accumulator input, so a bias has to be added afterwards.
+
+    ```mlir
+    %0 = strela.matvec %x, %w : tensor<1x?x128xi32>, tensor<1x128x128xi32> -> tensor<1x?x128xi32>
+    ```
+  }];
+  let arguments = (ins I32Tensor:$lhs, I32Tensor:$rhs);
+  let results = (outs I32Tensor:$result);
+  let assemblyFormat = [{
+    $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($result)
+  }];
+  let hasVerifier = 1;
+}
+
 // Common documentation for the two ops below.
 //
 // `binding` indexes the dispatch binding list, i.e. the `hal.pipeline.layout`

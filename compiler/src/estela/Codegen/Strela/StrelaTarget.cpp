@@ -120,13 +120,20 @@ struct StrelaExport {
 static FailureOr<StrelaExport> getExport(func::FuncOp funcOp) {
   SmallVector<Operation *> kernelOps;
   funcOp.walk([&](Operation *op) {
-    if (isa<strela::AddOp, strela::ReluOp>(op)) kernelOps.push_back(op);
+    if (isa<strela::AddOp, strela::ReluOp, strela::MatvecOp>(op)) {
+      kernelOps.push_back(op);
+    }
   });
   if (kernelOps.size() != 1) {
     return funcOp.emitOpError("expected exactly one STRELA operation, found ")
            << kernelOps.size();
   }
   Operation *kernelOp = kernelOps.front();
+  // TODO: the matvec kernel needs the workgroup grid and several output
+  // columns, which neither StrelaKernel nor the export format has yet.
+  if (isa<strela::MatvecOp>(kernelOp)) {
+    return kernelOp->emitOpError("cannot be serialized yet");
+  }
 
   StrelaExport result;
   result.kernel = isa<strela::AddOp>(kernelOp) ? &add_kernel : &relu_kernel;

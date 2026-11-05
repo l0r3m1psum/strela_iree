@@ -38,6 +38,7 @@ print(mlir::func::FuncOp funcOp) {
 using namespace mlir;
 using mlir::estela::isStrelaLinalgAdd;
 using mlir::estela::isStrelaLinalgRelu;
+using mlir::estela::isStrelaLinalgMatvec;
 
 namespace {
 
@@ -86,6 +87,31 @@ struct ConvertLinalgReluToStrela
   }
 };
 
+struct ConvertLinalgMatvecToStrela
+  : public OpRewritePattern<linalg::BatchMatmulOp> {
+  using OpRewritePattern<linalg::BatchMatmulOp>::OpRewritePattern;
+
+  LogicalResult
+  matchAndRewrite(
+    linalg::BatchMatmulOp matmulOp, PatternRewriter &rewriter
+  ) const override {
+    LogicalResult result = isStrelaLinalgMatvec(matmulOp);
+
+    // The zero fill init is dropped: the kernel computes from zero, and the
+    // fill is then dead and erased by the driver.
+    if (succeeded(result)) {
+      rewriter.replaceOpWithNewOp<strela::MatvecOp>(
+        matmulOp,
+        matmulOp.getResultTypes(),
+        matmulOp.getDpsInputs()[0],
+        matmulOp.getDpsInputs()[1]
+      );
+    }
+
+    return result;
+  }
+};
+
 struct LinalgToStrelaPass
   : public PassWrapper<LinalgToStrelaPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LinalgToStrelaPass)
@@ -104,7 +130,11 @@ struct LinalgToStrelaPass
     MLIRContext *context = &getContext();
 
     RewritePatternSet patterns(context);
-    patterns.add<ConvertLinalgAddToStrela, ConvertLinalgReluToStrela>(context);
+    patterns.add<
+      ConvertLinalgAddToStrela,
+      ConvertLinalgReluToStrela,
+      ConvertLinalgMatvecToStrela
+    >(context);
 
     GreedyRewriteConfig config;
     if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
