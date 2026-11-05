@@ -1,4 +1,4 @@
-#include "estela/Dialect/Strela/IR/StrelaOps.h"
+#include "estela/StrelaIR/StrelaOps.h"
 
 namespace mlir::strela {
 

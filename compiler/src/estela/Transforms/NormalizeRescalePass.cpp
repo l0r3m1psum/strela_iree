@@ -1,4 +1,4 @@
-#include "estela/Transforms/Tosa/Passes.h"
+#include "estela/Transforms/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -7,6 +7,11 @@
 #include "mlir/Dialect/Tosa/IR/TosaOps.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+
+namespace mlir::estela {
+#define GEN_PASS_DEF_NORMALIZERESCALEPASS
+#include "Passes.h.inc"
+} // namespace mlir::estela
 
 using namespace mlir;
 
@@ -144,12 +149,8 @@ struct DynamicBatchRewriter : public OpRewritePattern<tosa::RescaleOp> {
 };
 
 
-struct MyRewritePass : public PassWrapper<MyRewritePass, OperationPass<func::FuncOp>> {
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MyRewritePass)
-
-  StringRef getArgument() const override { return "iree-strela-normalize-rescale"; }
-  StringRef getDescription() const override { return "Rewrites sruff"; }
-
+struct NormalizeRescalePass final
+  : estela::impl::NormalizeRescalePassBase<NormalizeRescalePass> {
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
     mlir::MLIRContext *context = &getContext();
@@ -164,11 +165,3 @@ struct MyRewritePass : public PassWrapper<MyRewritePass, OperationPass<func::Fun
 };
 
 } // namespace
-
-namespace mlir::estela {
-
-std::unique_ptr<Pass> createNormalizeRescalePass() {
-  return std::make_unique<MyRewritePass>();
-}
-
-} // namespace mlir::estela

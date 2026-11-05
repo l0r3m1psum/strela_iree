@@ -1,4 +1,4 @@
-#include "estela/Dialect/Strela/Conversion/Passes.h"
+#include "estela/Transforms/Passes.h"
 
 #include <mutex>
 
@@ -9,8 +9,8 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
-#include "estela/Dialect/Strela/IR/StrelaDialect.h"
-#include "estela/Dialect/Strela/IR/StrelaOps.h"
+#include "estela/StrelaIR/StrelaDialect.h"
+#include "estela/StrelaIR/StrelaOps.h"
 #include "estela/Utils/KernelMatchers.h"
 
 static std::mutex printMutex;
@@ -34,6 +34,11 @@ static void
 print(mlir::func::FuncOp funcOp) {
   print(funcOp->getParentOfType<mlir::ModuleOp>());
 }
+
+namespace mlir::estela {
+#define GEN_PASS_DEF_CONVERTLINALGTOSTRELAPASS
+#include "Passes.h.inc"
+} // namespace mlir::estela
 
 using namespace mlir;
 using mlir::estela::isStrelaLinalgAdd;
@@ -112,19 +117,8 @@ struct ConvertLinalgMatvecToStrela
   }
 };
 
-struct LinalgToStrelaPass
-  : public PassWrapper<LinalgToStrelaPass, OperationPass<func::FuncOp>> {
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LinalgToStrelaPass)
-
-  StringRef getArgument() const override { return "iree-strela-convert-linalg"; }
-  StringRef getDescription() const override {
-    return "Converts linalg ops to strela backend ops";
-  }
-
-  void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<strela::StrelaDialect>();
-  }
-
+struct ConvertLinalgToStrelaPass final
+  : estela::impl::ConvertLinalgToStrelaPassBase<ConvertLinalgToStrelaPass> {
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
     MLIRContext *context = &getContext();
@@ -144,11 +138,3 @@ struct LinalgToStrelaPass
 };
 
 } // namespace
-
-namespace mlir::estela {
-
-std::unique_ptr<Pass> createConvertLinalgToStrelaPass() {
-  return std::make_unique<LinalgToStrelaPass>();
-}
-
-} // namespace mlir::estela

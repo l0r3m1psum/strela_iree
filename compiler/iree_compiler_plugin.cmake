@@ -13,24 +13,32 @@ add_subdirectory(
   "${CMAKE_CURRENT_BINARY_DIR}/estela_schemas"
 )
 
-# Nothing but the plugin session: options, the pass pipelines it installs, and
-# the HAL target registration.
+# The plugin session (options, the pass pipelines it installs, the pass and HAL
+# target registration) and the STRELA HAL target itself.
 iree_cc_library(
   NAME
     registration
+  HDRS
+    "${CMAKE_CURRENT_LIST_DIR}/src/estela/StrelaTarget.h"
   SRCS
     "${CMAKE_CURRENT_LIST_DIR}/src/estela/PluginRegistration.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/estela/StrelaTarget.cpp"
   DEPS
     iree::..::..::compiler::src::estela::defs
-    iree::..::..::compiler::src::estela::Codegen::Strela::StrelaTarget
-    iree::..::..::compiler::src::estela::Dialect::Strela::Conversion::StrelaConversion
-    iree::..::..::compiler::src::estela::Dialect::Strela::IR::IR
-    iree::..::..::compiler::src::estela::Transforms::Linalg::LinalgTransforms
-    iree::..::..::compiler::src::estela::Transforms::Tosa::TosaTransforms
+    iree::..::..::compiler::src::estela::StrelaIR::IR
+    iree::..::..::compiler::src::estela::Transforms::Transforms
+    iree::..::..::compiler::src::estela::Utils::Utils
+    iree::compiler::Dialect::HAL::IR
+    iree::compiler::Dialect::HAL::Target
+    iree::compiler::Dialect::Stream::IR
     iree::compiler::PluginAPI
+    iree::compiler::Utils
+    iree::base::internal::flatcc::building
+    estela::schemas::strela_executable_def_c_fbs
     MLIRFuncDialect
     MLIRIR
     MLIRPass
+    MLIRSupport
   PUBLIC
 )
 

@@ -6,10 +6,9 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
 
-#include "estela/Dialect/Strela/IR/StrelaDialect.h"
-#include "estela/Codegen/Strela/StrelaTarget.h"
-#include "estela/Transforms/Linalg/Passes.h"
-#include "estela/Transforms/Tosa/Passes.h"
+#include "estela/StrelaIR/StrelaDialect.h"
+#include "estela/StrelaTarget.h"
+#include "estela/Transforms/Passes.h"
 
 using namespace mlir;
 using namespace mlir::iree_compiler;
@@ -35,7 +34,7 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   // Lets iree-opt run the passes on their own, e.g. in LIT tests.
   static void
   registerPasses() {
-    mlir::registerPass([] { return estela::createTransferWrapPass(); });
+    estela::registerEstelaPasses();
   }
 
   void

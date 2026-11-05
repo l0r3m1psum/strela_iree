@@ -1,4 +1,4 @@
-#include "estela/Transforms/Linalg/Passes.h"
+#include "estela/Transforms/Passes.h"
 
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
@@ -13,18 +13,18 @@
 
 #include "llvm/Support/DebugLog.h"
 
+namespace mlir::estela {
+#define GEN_PASS_DEF_ASSIGNTOPOLOGYPASS
+#include "Passes.h.inc"
+} // namespace mlir::estela
+
 using namespace mlir;
 using namespace mlir::iree_compiler;
 
 namespace {
 
-struct AssignTopologyPass
-  : public PassWrapper<AssignTopologyPass, OperationPass<ModuleOp>> {
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AssignTopologyPass)
-
-  StringRef getArgument() const override { return "iree-strela-assign-topology"; }
-  StringRef getDescription() const override { return "Assigns the topology of the STRELA device"; }
-
+struct AssignTopologyPass final
+  : estela::impl::AssignTopologyPassBase<AssignTopologyPass> {
   void runOnOperation() override {
     ModuleOp moduleOp = getOperation();
     if (moduleOp->hasAttr("stream.topology")){
@@ -73,11 +73,3 @@ struct AssignTopologyPass
 };
 
 } // namespace
-
-namespace mlir::estela {
-
-std::unique_ptr<Pass> createAssignTopologyPass() {
-  return std::make_unique<AssignTopologyPass>();
-}
-
-} // namespace mlir::estela

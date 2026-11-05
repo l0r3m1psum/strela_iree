@@ -1,9 +1,14 @@
-#include "estela/Dialect/Strela/Transforms/Passes.h"
+#include "estela/Transforms/Passes.h"
 
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/Builders.h"
+
+namespace mlir::estela {
+#define GEN_PASS_DEF_RESOLVEWORKGROUPCOUNTPASS
+#include "Passes.h.inc"
+} // namespace mlir::estela
 
 using namespace mlir;
 using namespace mlir::iree_compiler;
@@ -17,19 +22,8 @@ namespace {
 // inlined into the host program and --compile-to=vm aborts inside
 // iree-vm-conversion with "callback produced incorrect number of values".
 // A STRELA kernel always runs as a single unit of work, so return (1, 1, 1).
-struct StrelaResolveWorkgroupCountPass
-    : public PassWrapper<StrelaResolveWorkgroupCountPass,
-                         OperationPass<IREE::HAL::ExecutableVariantOp>> {
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(StrelaResolveWorkgroupCountPass)
-
-  StringRef getArgument() const override {
-    return "iree-strela-resolve-workgroup-count";
-  }
-  StringRef getDescription() const override {
-    return "Replaces STRELA export workgroup count "
-      "(iree_tensor_ext.dispatch.workgroup_count_from_slice) regions with (1, 1, 1)";
-  }
-
+struct ResolveWorkgroupCountPass final
+    : estela::impl::ResolveWorkgroupCountPassBase<ResolveWorkgroupCountPass> {
   void runOnOperation() override {
     IREE::HAL::ExecutableVariantOp variantOp = getOperation();
     OpBuilder builder(&getContext());
@@ -55,11 +49,3 @@ struct StrelaResolveWorkgroupCountPass
 };
 
 } // namespace
-
-namespace mlir::estela {
-
-std::unique_ptr<Pass> createResolveWorkgroupCountPass() {
-  return std::make_unique<StrelaResolveWorkgroupCountPass>();
-}
-
-} // namespace mlir::estela

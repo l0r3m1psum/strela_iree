@@ -1,5 +1,5 @@
-#ifndef ESTELA_DIALECT_STRELA_IR_STRELADIALECT_H_
-#define ESTELA_DIALECT_STRELA_IR_STRELADIALECT_H_
+#ifndef ESTELA_STRELAIR_STRELADIALECT_H_
+#define ESTELA_STRELAIR_STRELADIALECT_H_
 
 #include "mlir/IR/Dialect.h"
 
@@ -7,4 +7,4 @@
 // StrelaDialect.cpp so it is compiled exactly once.
 #include "StrelaDialect.h.inc"
 
-#endif // ESTELA_DIALECT_STRELA_IR_STRELADIALECT_H_
+#endif // ESTELA_STRELAIR_STRELADIALECT_H_

@@ -1,4 +1,4 @@
-#include "estela/Transforms/Linalg/Passes.h"
+#include "estela/Transforms/Passes.h"
 #include "estela/Utils/KernelMatchers.h"
 
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
@@ -14,6 +14,11 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "llvm/Support/DebugLog.h"
+
+namespace mlir::estela {
+#define GEN_PASS_DEF_TRANSFERWRAPPASS
+#include "Passes.h.inc"
+} // namespace mlir::estela
 
 using namespace mlir;
 using namespace mlir::iree_compiler;
@@ -120,13 +125,8 @@ pinAbiToDefaultDevice(IREE::Util::FuncOp funcOp) {
   });
 }
 
-struct TransferWrapPass
-  : public PassWrapper<TransferWrapPass, OperationPass<IREE::Util::FuncOp>> {
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TransferWrapPass)
-
-  StringRef getArgument() const override { return "iree-strela-transfer-wrap"; }
-  StringRef getDescription() const override { return "Wraps the supported operations in flow.tensor.transfer operations"; }
-
+struct TransferWrapPass final
+  : estela::impl::TransferWrapPassBase<TransferWrapPass> {
   void runOnOperation() override {
     IREE::Util::FuncOp funcOp = getOperation();
     IREE::HAL::DeviceAffinityAttr strela = findStrelaAffinity(funcOp);
@@ -152,18 +152,6 @@ struct TransferWrapPass
       wrapInTransfers(rewriter, op, strela, host);
     }
   }
-
-  void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<IREE::Flow::FlowDialect>();
-  }
 };
 
 } // namespace
-
-namespace mlir::estela {
-
-std::unique_ptr<Pass> createTransferWrapPass() {
-  return std::make_unique<TransferWrapPass>();
-}
-
-} // namespace mlir::estela

@@ -1,4 +1,4 @@
-#include "estela/Transforms/Linalg/Passes.h"
+#include "estela/Transforms/Passes.h"
 
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 
@@ -11,6 +11,11 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "estela/Utils/Bitstreams.h"
+
+namespace mlir::estela {
+#define GEN_PASS_DEF_FUSECONV2DPASS
+#include "Passes.h.inc"
+} // namespace mlir::estela
 
 using namespace mlir;
 using namespace mlir::iree_compiler;
@@ -298,12 +303,7 @@ struct Conv2DOffload : public OpRewritePattern<linalg::Conv2DNhwcHwcfQOp> {
 };
 
 // NOTE: should OperationPass<T> be OperationPass<ModuleOp>?
-struct MyFusionPass : public PassWrapper<MyFusionPass, OperationPass<func::FuncOp>> {
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MyFusionPass)
-
-  StringRef getArgument() const override { return "iree-strela-fuse-conv2d"; }
-  StringRef getDescription() const override { return "Fuses centering subtractions into a GEMM ukernel"; }
-
+struct FuseConv2DPass final : estela::impl::FuseConv2DPassBase<FuseConv2DPass> {
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
     mlir::MLIRContext *context = &getContext();
@@ -318,11 +318,3 @@ struct MyFusionPass : public PassWrapper<MyFusionPass, OperationPass<func::FuncO
 };
 
 } // namespace
-
-namespace mlir::estela {
-
-std::unique_ptr<Pass> createFuseConv2DPass() {
-  return std::make_unique<MyFusionPass>();
-}
-
-} // namespace mlir::estela

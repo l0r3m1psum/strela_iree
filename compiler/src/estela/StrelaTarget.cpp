@@ -1,4 +1,4 @@
-#include "estela/Codegen/Strela/StrelaTarget.h"
+#include "estela/StrelaTarget.h"
 
 #include <array>
 
@@ -10,11 +10,9 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/Pass/PassManager.h"
 
-#include "estela/Dialect/Strela/IR/StrelaDialect.h"
-#include "estela/Dialect/Strela/IR/StrelaOps.h"
-#include "estela/Dialect/Strela/Conversion/Passes.h"
-#include "estela/Transforms/Linalg/Passes.h"
-#include "estela/Dialect/Strela/Transforms/Passes.h"
+#include "estela/StrelaIR/StrelaDialect.h"
+#include "estela/StrelaIR/StrelaOps.h"
+#include "estela/Transforms/Passes.h"
 #include "estela/Utils/Bitstreams.h"
 
 #include "strela_executable_def_builder.h"

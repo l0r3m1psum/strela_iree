@@ -1,9 +1,10 @@
 """Lit config for the Estela compiler tests.
 
 These tests live outside the IREE source tree, so lit will not find
-3rdparty/iree/compiler/lit.cfg.py by walking upwards from them; this file is
-the config for this directory. It is deliberately a near-copy of IREE's own so
-the two behave the same way.
+3rdparty/iree/compiler/lit.cfg.py by walking upwards from them. lit finds this
+file by walking up from a test, so it sits at the repository root to cover both
+tests/ and the pass tests in compiler/src/estela/Transforms/tests. It is
+deliberately a near-copy of IREE's own so the two behave the same way.
 """
 
 # config is injected by lit, not defined here.

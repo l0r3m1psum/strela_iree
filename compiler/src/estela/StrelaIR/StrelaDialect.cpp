@@ -1,6 +1,6 @@
-#include "estela/Dialect/Strela/IR/StrelaDialect.h"
+#include "estela/StrelaIR/StrelaDialect.h"
 
-#include "estela/Dialect/Strela/IR/StrelaOps.h"
+#include "estela/StrelaIR/StrelaOps.h"
 
 #include "StrelaDialect.cpp.inc"
 

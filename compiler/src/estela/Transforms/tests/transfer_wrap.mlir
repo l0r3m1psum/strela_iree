@@ -31,7 +31,8 @@ module attributes {stream.affinity.default = #hal.device.affinity<@cpu0>} {
   }
 }
 
-// CHECK-LABEL: util.func public @relu(%[[X:.+]]: tensor<?xi32>)
+// CHECK-LABEL: util.func public @relu(
+// CHECK-SAME:    %[[X:.+]]: tensor<?xi32>)
 // CHECK:         %[[INIT:.+]] = tensor.empty(%{{.+}}) : tensor<?xi32>
 // CHECK:         %[[INIT_N:.+]] = tensor.dim %[[INIT]], %{{.+}} : tensor<?xi32>
 // CHECK:         %[[X_N:.+]] = tensor.dim %[[X]], %{{.+}} : tensor<?xi32>

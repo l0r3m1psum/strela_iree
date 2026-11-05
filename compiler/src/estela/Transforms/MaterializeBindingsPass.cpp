@@ -1,4 +1,4 @@
-#include "estela/Dialect/Strela/Transforms/Passes.h"
+#include "estela/Transforms/Passes.h"
 
 #include <optional>
 
@@ -12,8 +12,13 @@
 #include "mlir/IR/Matchers.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
-#include "estela/Dialect/Strela/IR/StrelaDialect.h"
-#include "estela/Dialect/Strela/IR/StrelaOps.h"
+#include "estela/StrelaIR/StrelaDialect.h"
+#include "estela/StrelaIR/StrelaOps.h"
+
+namespace mlir::estela {
+#define GEN_PASS_DEF_MATERIALIZEBINDINGSPASS
+#include "Passes.h.inc"
+} // namespace mlir::estela
 
 using namespace mlir;
 using namespace mlir::iree_compiler;
@@ -27,7 +32,7 @@ namespace {
 // The HAL hands a dispatch to the driver as (workgroup count, push constants,
 // bindings). Nothing about which binding is which kernel argument survives into
 // the binary unless we put it there, so these helpers read it back out of the
-// executable source and StrelaMaterializeBindingsPass restates it as
+// executable source and MaterializeBindingsPass restates it as
 // strela.binding_load / strela.binding_store.
 
 // Where one STRELA kernel argument comes from, as far as the compiler is
@@ -168,7 +173,7 @@ matchBinding(Value dispatchTensor) {
 
 struct StrelaEntryPointInfo {
   // The strela.* op itself, and the load/store ops each argument came from.
-  // StrelaMaterializeBindingsPass uses their locations so a binding that cannot
+  // MaterializeBindingsPass uses their locations so a binding that cannot
   // be resolved is reported against the op it came from.
   Operation *kernelOp = nullptr;
   SmallVector<Operation *> operandOps;
@@ -272,21 +277,8 @@ analyzeEntryPoint(func::FuncOp funcOp) {
 // Rewrites the dispatch interface of a STRELA kernel into strela.binding_load /
 // strela.binding_store, deleting the `hal.interface.*` ops, the push constant
 // loads and the arithmetic that reassembled the byte offsets from them.
-struct StrelaMaterializeBindingsPass
-    : public PassWrapper<StrelaMaterializeBindingsPass, OperationPass<func::FuncOp>> {
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(StrelaMaterializeBindingsPass)
-
-  StringRef getArgument() const override {
-    return "iree-strela-materialize-bindings";
-  }
-  StringRef getDescription() const override {
-    return "Replaces the STRELA dispatch interface with strela.binding_load/store";
-  }
-
-  void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<strela::StrelaDialect>();
-  }
-
+struct MaterializeBindingsPass final
+    : estela::impl::MaterializeBindingsPassBase<MaterializeBindingsPass> {
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
 
@@ -337,11 +329,3 @@ struct StrelaMaterializeBindingsPass
 };
 
 } // namespace
-
-namespace mlir::estela {
-
-std::unique_ptr<Pass> createMaterializeBindingsPass() {
-  return std::make_unique<StrelaMaterializeBindingsPass>();
-}
-
-} // namespace mlir::estela

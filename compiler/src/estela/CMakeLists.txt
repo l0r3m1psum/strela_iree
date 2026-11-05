@@ -1,6 +1,6 @@
 # Include root for the plugin sources, so headers are referenced by their full
-# path from compiler/src (e.g. "estela/Dialect/Strela/IR/StrelaOps.h"). Every
-# library here depends on this.
+# path from compiler/src (e.g. "estela/StrelaIR/StrelaOps.h"). Every library
+# here depends on this.
 iree_cc_library(
   NAME
     defs
@@ -10,9 +10,5 @@ iree_cc_library(
 )
 
 add_subdirectory(Utils)
-add_subdirectory(Dialect/Strela/IR)
-add_subdirectory(Dialect/Strela/Transforms)
-add_subdirectory(Dialect/Strela/Conversion)
-add_subdirectory(Transforms/Linalg)
-add_subdirectory(Transforms/Tosa)
-add_subdirectory(Codegen/Strela)
+add_subdirectory(StrelaIR)
+add_subdirectory(Transforms)

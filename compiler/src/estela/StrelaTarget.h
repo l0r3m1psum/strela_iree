@@ -1,8 +1,8 @@
 // The STRELA HAL target: what the compiler needs to know to produce an
 // executable for the accelerator, and what it advertises about the device.
 
-#ifndef ESTELA_CODEGEN_STRELA_STRELATARGET_H_
-#define ESTELA_CODEGEN_STRELA_STRELATARGET_H_
+#ifndef ESTELA_STRELATARGET_H_
+#define ESTELA_STRELATARGET_H_
 
 #include "iree/compiler/Dialect/HAL/Target/TargetBackend.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetDevice.h"
@@ -46,4 +46,4 @@ struct StrelaTargetDevice : public iree_compiler::IREE::HAL::TargetDevice {
 
 } // namespace mlir::estela
 
-#endif // ESTELA_CODEGEN_STRELA_STRELATARGET_H_
+#endif // ESTELA_STRELATARGET_H_
