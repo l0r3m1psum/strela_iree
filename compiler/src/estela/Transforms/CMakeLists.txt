@@ -17,6 +17,7 @@ iree_cc_library(
     "AssignTopologyPass.cpp"
     "ConvertLinalgToStrelaPass.cpp"
     "FuseConv2DPass.cpp"
+    "LinkExecutablesPass.cpp"
     "MaterializeBindingsPass.cpp"
     "NormalizeRescalePass.cpp"
     "ResolveWorkgroupCountPass.cpp"
@@ -30,11 +31,13 @@ iree_cc_library(
     iree::..::..::compiler::src::estela::defs
     iree::..::..::compiler::src::estela::StrelaIR::IR
     iree::..::..::compiler::src::estela::Utils::Utils
+    iree::compiler::Codegen::Utils
     iree::compiler::Dialect::Flow::IR
     iree::compiler::Dialect::HAL::IR
     iree::compiler::Dialect::Stream::IR
     iree::compiler::Dialect::TensorExt::IR
     iree::compiler::Dialect::Util::IR
+    iree::compiler::Utils
     MLIRArithDialect
     MLIRFuncDialect
     MLIRIR

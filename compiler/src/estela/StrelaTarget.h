@@ -21,6 +21,8 @@ struct StrelaTargetBackend : public iree_compiler::IREE::HAL::TargetBackend {
     OpPassManager &passManager
   ) override;
 
+  void buildLinkingPassPipeline(OpPassManager &passManager) override;
+
   void getDefaultExecutableTargets(
     MLIRContext *context,
     StringRef deviceID,

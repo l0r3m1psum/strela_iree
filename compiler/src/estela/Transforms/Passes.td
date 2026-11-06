@@ -71,4 +71,19 @@ def ResolveWorkgroupCountPass
   }];
 }
 
+//===----------------------------------------------------------------------===//
+// STRELA executable linking
+//===----------------------------------------------------------------------===//
+
+def LinkExecutablesPass
+    : Pass<"iree-strela-link-executables", "mlir::ModuleOp"> {
+  let summary = "Links all STRELA executables into one with several exports";
+  let description = [{
+    Moves the exports of every STRELA executable into a single
+    `<module>_linked_strela` executable, renumbering their ordinals and
+    rewriting the dispatch sites, so the runtime loads one executable instead
+    of one per dispatch. Lazily loaded executables are left alone.
+  }];
+}
+
 #endif // ESTELA_TRANSFORMS_PASSES

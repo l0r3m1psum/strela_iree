@@ -169,6 +169,11 @@ StrelaTargetBackend::buildTranslationPassPipeline(
   );
 }
 
+void
+StrelaTargetBackend::buildLinkingPassPipeline(OpPassManager &passManager) {
+  passManager.addPass(estela::createLinkExecutablesPass());
+}
+
 // TODO: how does this relate to StrelaTargetDevice::getDefaultDeviceTarget?
 // Can some code between the two be reused?
 void
