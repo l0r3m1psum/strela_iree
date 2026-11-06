@@ -21,8 +21,10 @@ iree_lit_test_suite(
     "flush/transfer_flush.mlir"
     "runtime/strela_transfer.mlir"
     "end2end.mlir"
+    "serialization.mlir"
   TOOLS
     FileCheck
+    estela::tools::estela-dump-executable
     iree-compile
     iree-opt
     not

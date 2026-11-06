@@ -49,6 +49,13 @@ iree_compiler_register_plugin(
     ::registration
 )
 
+# Host tools for inspecting what the plugin produces. They sit at the top level
+# like IREE's tools/, and only need the compiler build (the schemas above).
+add_subdirectory(
+  "${CMAKE_CURRENT_LIST_DIR}/../tools"
+  "${CMAKE_CURRENT_BINARY_DIR}/estela_tools"
+)
+
 # The lit tests drive iree-compile/iree-opt with --iree-plugin=estela, so they
 # belong to the compiler plugin rather than the runtime one. iree_lit_test_suite
 # is a no-op when IREE_BUILD_TESTS is off, which is what the ARM build uses.

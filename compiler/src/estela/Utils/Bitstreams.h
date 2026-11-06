@@ -26,6 +26,9 @@ namespace mlir::estela {
  * +--+--+--+--+
  */
 // Constants are -1=0xFFFFFFFF and delays are set to 0xDDEE
+// Perform matrix vector multiplication. In the first column it takes as input
+// one input vector x three rows w_{:,i+0} w_{:,i+1} w_{:,i+2} in the other
+// three STRELA columns to output their scalar products y_{i+0} y_{i+1} y_{i+2}.
 inline constexpr std::array<uint32_t, 5 * 4 * 4> centered_matmul_bitstream{
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
@@ -135,6 +138,13 @@ struct StrelaKernel {
 // Only the adder on columns 0 and 1 is used.
 inline constexpr StrelaKernel add_kernel{&add_bitstream, 2, {0, 1}, 1};
 inline constexpr StrelaKernel relu_kernel{&relu_bitstream, 1, {0}, 0};
+
+inline constexpr std::array<uint32_t, 5 * 4 * 4> matvecBitstream(uint16_t inChan) {
+  auto k = centered_matmul_bitstream;
+  k[19] = k[39] = k[59] = k[79] = 0;                         // PE 0-3 constants (zero points)
+  k[27] = k[47] = k[67] = (uint32_t(inChan) << 16) | 0x0080; // PE 9-11 accumulation length
+  return k;
+}
 
 } // namespace mlir::estela
 

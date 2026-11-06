@@ -241,16 +241,27 @@ StrelaTargetBackend::serializeExecutable(
   iree_hal_strela_ExecutableDef_exports_add(builder, exportsRef);
   iree_hal_strela_ExecutableDef_end_as_root(builder);
 
+  DenseIntElementsAttr bufferAttr = builder.getHeaderPrefixedBufferAttr(
+    executableBuilder.getContext(),
+    /*magic=*/iree_hal_strela_ExecutableDef_file_identifier,
+    /*version=*/0
+  );
+
+  // --iree-hal-dump-executable-binaries-to: exactly the bytes the runtime
+  // loads, IREE header included.
+  if (!options.dumpBinariesPath.empty()) {
+    IREE::HAL::dumpDataToPath<char>(
+      options.dumpBinariesPath, options.dumpBaseName, variantOp.getName(),
+      ".str1", bufferAttr.getRawData()
+    );
+  }
+
   auto binaryOp = IREE::HAL::ExecutableBinaryOp::create(
     executableBuilder,
     variantOp.getLoc(),
     variantOp.getSymNameAttr(),
     variantOp.getTarget().getFormat(),
-    builder.getHeaderPrefixedBufferAttr(
-      executableBuilder.getContext(),
-      /*magic=*/iree_hal_strela_ExecutableDef_file_identifier,
-      /*version=*/0
-    )
+    bufferAttr
   );
   binaryOp.setMimeTypeAttr(
     executableBuilder.getStringAttr("application/x-flatbuffers")
