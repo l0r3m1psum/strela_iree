@@ -1,6 +1,6 @@
 #include "estela/Transforms/Passes.h"
 
-#include <optional>
+#include <variant>
 
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 #include "iree/compiler/Dialect/TensorExt/IR/TensorExtOps.h"
@@ -35,23 +35,21 @@ namespace {
 // executable source and MaterializeBindingsPass restates it as
 // strela.binding_load / strela.binding_store.
 
+// The push constant holding an offset that is only known at dispatch time.
+struct PushConstant {
+  uint32_t ordinal;
+};
+
 // Where one STRELA kernel argument comes from, as far as the compiler is
 // concerned. How this eventually reaches the driver is a serialization concern
-// and deliberately not modelled here.
+// and deliberately not modeled here.
 struct StrelaBinding {
   // Index into the dispatch binding list, i.e. the hal.pipeline.layout ordinal.
   uint32_t binding = 0;
-  // Push constant ordinals holding the subspan byte offset, set only when that
-  // offset varies per dispatch site: [low, high] halves of a 64 bit offset, or
-  // a single one when Stream proved the offset fits in 32 bits. The pair is not
-  // necessarily adjacent: IREE dedupes the constant loads, so two bindings whose
-  // offsets share a low word also share that ordinal.
-  SmallVector<uint32_t, 2> offsets;
-  // The subspan byte offset when it is known at compile time and non-zero,
-  // which is what FuseDispatchBindings leaves behind after packing several
-  // operands into one buffer.
-  std::optional<uint64_t> staticByteOffset;
-  // Both empty means the subspan starts at byte zero. They are never both set.
+  // The subspan byte offset: known at compile time (zero for most bindings,
+  // non-zero after FuseDispatchBindings packs several operands into one
+  // buffer), or varying per dispatch site and passed in a push constant.
+  std::variant<uint32_t, PushConstant> offset = 0u;
 };
 
 // `util.assume.int` forwards its operands unchanged; look through it so the
@@ -64,87 +62,58 @@ lookThroughAssume(Value value) {
   return value;
 }
 
-// Recognizes the four forms a `hal.interface.binding.subspan` byte offset
-// takes in an executable source and reports where the driver can find it:
-//   * absent or a literal zero                       -> offset is zero
-//   * any other literal                              -> that constant offset
-//   * index_castui(load LO)                          -> ordinal LO
-//   * index_castui(ori(extui(load LO),
-//                      shli(extui(load HI), 32)))    -> ordinals LO and HI
-// Stream emits the single load when util.assume.int bounds the offset below
-// 2^32, which it does for every statically known dispatch site.
-// Anything else we cannot describe to the driver, so serialization fails rather
-// than emitting a kernel that would read from the wrong address.
-//
-// LO and HI are recorded independently: IREE dedupes the constant loads, so in
-// a dispatch where two offsets share a low word they also share that ordinal
-// and the pair is not adjacent.
 // Appended to every diagnostic that comes from failing to read a subspan byte
 // offset. Offsets are non-zero at all only because Stream's FuseDispatchBindings
 // merges bindings and either folds the per-dispatch-site offset into a constant
-// or passes it in push constants; with that pass off they are all literal zeros
-// and the patterns below are never exercised. Naming the flag in the message
-// keeps a network that hits an offset shape we do not recognize a one-flag fix
-// rather than a compiler change.
+// or passes it in push constants; with that pass off they are all literal zeros.
 static constexpr const char *strelaUnfusedBindingsHint =
   "; retry with --iree-scheduling-optimize-bindings=false, which stops "
   "FuseDispatchBindings from folding per-dispatch-site offsets into push "
   "constants and leaves every subspan offset a literal zero";
 
-// On success exactly one of `binding.offsets` and `binding.staticByteOffset` is
-// set, or neither when the offset is a compile-time zero.
+// Recognizes the forms of a `hal.interface.binding.subspan` byte offset the
+// executable format can describe, a 32 bit immediate or push constant:
+//   * absent or a literal zero  -> offset is zero
+//   * any other literal         -> that constant offset
+//   * index_castui(load ORD)    -> push constant ORD
+// A 64 bit offset arrives as two push constants, (hi << 32) | lo, whose high
+// half is only known at dispatch time. Stream's PackDispatchOperands splits it
+// unless --iree-stream-resource-index-bits=32, so the diagnostic says so.
 static LogicalResult
-matchBindingOffset(Value byteOffset, StrelaBinding &binding) {
-  auto &offsets = binding.offsets;
-  offsets.clear();
-  binding.staticByteOffset.reset();
+matchBindingOffset(Operation *op, Value byteOffset, StrelaBinding &binding) {
+  binding.offset = 0u;
   if (!byteOffset) return success();
 
   byteOffset = lookThroughAssume(byteOffset);
 
   llvm::APInt literal;
   if (matchPattern(byteOffset, m_ConstantInt(&literal))) {
-    // A constant offset needs nothing from the host at dispatch time: the
-    // driver can fold it into the base address when it binds the buffer.
-    if (literal.isNegative() || literal.getActiveBits() > 64) return failure();
-    if (!literal.isZero()) binding.staticByteOffset = literal.getZExtValue();
+    if (literal.isNegative() || literal.getActiveBits() > 32) {
+      return op->emitOpError("byte offset ") << literal.getSExtValue()
+             << " does not fit in 32 bits";
+    }
+    binding.offset = static_cast<uint32_t>(literal.getZExtValue());
     return success();
   }
 
-  auto castOp = byteOffset.getDefiningOp<arith::IndexCastUIOp>();
-  if (!castOp) return failure();
-
-  if (auto loadOp = lookThroughAssume(castOp.getIn())
-                      .getDefiningOp<IREE::HAL::InterfaceConstantLoadOp>()) {
-    offsets.push_back(static_cast<uint32_t>(loadOp.getOrdinal().getZExtValue()));
-    return success();
+  if (auto castOp = byteOffset.getDefiningOp<arith::IndexCastUIOp>()) {
+    Value in = lookThroughAssume(castOp.getIn());
+    if (auto loadOp = in.getDefiningOp<IREE::HAL::InterfaceConstantLoadOp>()) {
+      binding.offset =
+        PushConstant{static_cast<uint32_t>(loadOp.getOrdinal().getZExtValue())};
+      return success();
+    }
+    if (in.getDefiningOp<arith::OrIOp>()) {
+      return op->emitOpError(
+               "byte offset is a 64 bit value split over two push constants; "
+               "STRELA takes 32 bit offsets, retry with "
+               "--iree-stream-resource-index-bits=32"
+             );
+    }
   }
-
-  auto orOp = lookThroughAssume(castOp.getIn()).getDefiningOp<arith::OrIOp>();
-  if (!orOp) return failure();
-
-  auto lowExtOp = lookThroughAssume(orOp.getLhs()).getDefiningOp<arith::ExtUIOp>();
-  auto shiftOp = lookThroughAssume(orOp.getRhs()).getDefiningOp<arith::ShLIOp>();
-  if (!lowExtOp || !shiftOp) return failure();
-
-  llvm::APInt shiftAmount;
-  if (!matchPattern(shiftOp.getRhs(), m_ConstantInt(&shiftAmount)) ||
-      shiftAmount != 32) {
-    return failure();
-  }
-
-  auto highExtOp = lookThroughAssume(shiftOp.getLhs()).getDefiningOp<arith::ExtUIOp>();
-  if (!highExtOp) return failure();
-
-  auto lowLoadOp =
-    lowExtOp.getIn().getDefiningOp<IREE::HAL::InterfaceConstantLoadOp>();
-  auto highLoadOp =
-    highExtOp.getIn().getDefiningOp<IREE::HAL::InterfaceConstantLoadOp>();
-  if (!lowLoadOp || !highLoadOp) return failure();
-
-  offsets.push_back(static_cast<uint32_t>(lowLoadOp.getOrdinal().getZExtValue()));
-  offsets.push_back(static_cast<uint32_t>(highLoadOp.getOrdinal().getZExtValue()));
-  return success();
+  return op->emitOpError(
+           "could not resolve the byte offset of this binding"
+         ) << strelaUnfusedBindingsHint;
 }
 
 // True if a dispatch tensor load/store reads or writes the tensor densely from
@@ -156,17 +125,20 @@ coversWholeTensor(ArrayRef<OpFoldResult> offsets, ArrayRef<OpFoldResult> strides
       && llvm::all_of(strides, [](OpFoldResult v) { return isConstantIntValue(v, 1); });
 }
 
-// Resolves a dispatch tensor to the binding it is a view of.
-static std::optional<StrelaBinding>
-matchBinding(Value dispatchTensor) {
+// Resolves the dispatch tensor `op` loads or stores to the binding it is a
+// view of, reporting failures at `op`.
+static FailureOr<StrelaBinding>
+matchBinding(Operation *op, Value dispatchTensor) {
   auto subspanOp =
     dispatchTensor.getDefiningOp<IREE::HAL::InterfaceBindingSubspanOp>();
-  if (!subspanOp) return std::nullopt;
+  if (!subspanOp) {
+    return op->emitOpError("does not access a hal.interface.binding.subspan");
+  }
 
   StrelaBinding binding;
   binding.binding = static_cast<uint32_t>(subspanOp.getBinding().getZExtValue());
-  if (failed(matchBindingOffset(subspanOp.getByteOffset(), binding))) {
-    return std::nullopt;
+  if (failed(matchBindingOffset(op, subspanOp.getByteOffset(), binding))) {
+    return failure();
   }
   return binding;
 }
@@ -233,13 +205,8 @@ analyzeEntryPoint(func::FuncOp funcOp) {
              << "reads a strided or offset slice; STRELA kernels only take "
                 "dense whole-tensor operands";
     }
-    std::optional<StrelaBinding> binding =
-      matchBinding(loadOp.getSource());
-    if (!binding) {
-      return loadOp.emitOpError()
-             << "could not resolve the binding and byte offset this operand "
-                "comes from" << strelaUnfusedBindingsHint;
-    }
+    FailureOr<StrelaBinding> binding = matchBinding(loadOp, loadOp.getSource());
+    if (failed(binding)) return failure();
     info.operands.push_back(*binding);
     info.operandOps.push_back(loadOp);
   }
@@ -261,13 +228,8 @@ analyzeEntryPoint(func::FuncOp funcOp) {
            << "writes a strided or offset slice; STRELA kernels only produce "
               "dense whole-tensor results";
   }
-  std::optional<StrelaBinding> resultBinding =
-    matchBinding(storeOp.getTarget());
-  if (!resultBinding) {
-    return storeOp.emitOpError()
-           << "could not resolve the binding and byte offset the result goes to"
-           << strelaUnfusedBindingsHint;
-  }
+  FailureOr<StrelaBinding> resultBinding = matchBinding(storeOp, storeOp.getTarget());
+  if (failed(resultBinding)) return failure();
   info.result = *resultBinding;
   info.resultOp = storeOp;
 
@@ -286,35 +248,35 @@ struct MaterializeBindingsPass final
     if (failed(info)) return signalPassFailure();
 
     OpBuilder builder(info->kernelOp);
-    auto offsetsAttrOf = [&builder](const StrelaBinding &binding) {
-      if (binding.offsets.empty()) return DenseI64ArrayAttr();
-      return builder.getDenseI64ArrayAttr(llvm::to_vector_of<int64_t>(binding.offsets));
-    };
-    auto byteOffsetAttrOf = [&builder](const StrelaBinding &binding) {
-      if (!binding.staticByteOffset) return IntegerAttr();
-      return builder.getI64IntegerAttr(
-        static_cast<int64_t>(*binding.staticByteOffset)
-      );
+    // The (offset_ordinal, byte_offset) attributes of a binding op. A zero byte
+    // offset is written by omitting the attribute.
+    auto offsetAttrsOf = [&builder](const StrelaBinding &binding)
+      -> std::pair<IntegerAttr, IntegerAttr> {
+      if (auto *constant = std::get_if<PushConstant>(&binding.offset)) {
+        return {builder.getI64IntegerAttr(constant->ordinal), IntegerAttr()};
+      }
+      uint32_t bytes = std::get<uint32_t>(binding.offset);
+      return {IntegerAttr(), bytes ? builder.getI64IntegerAttr(bytes) : IntegerAttr()};
     };
 
     // Operands: the load takes over from subspan + dispatch.tensor.load, and
     // keeps that load's location so diagnostics still point at the original.
     for (auto [index, binding] : llvm::enumerate(info->operands)) {
       Operation *loadOp = info->operandOps[index];
+      auto [ordinalAttr, byteOffsetAttr] = offsetAttrsOf(binding);
       auto bindingLoadOp = strela::BindingLoadOp::create(
         builder, loadOp->getLoc(), loadOp->getResult(0).getType(),
-        static_cast<int64_t>(binding.binding), offsetsAttrOf(binding),
-        byteOffsetAttrOf(binding)
+        static_cast<int64_t>(binding.binding), ordinalAttr, byteOffsetAttr
       );
       info->kernelOp->setOperand(index, bindingLoadOp.getResult());
     }
 
     // Result: the store takes over from dispatch.tensor.store.
     builder.setInsertionPointAfter(info->kernelOp);
+    auto [ordinalAttr, byteOffsetAttr] = offsetAttrsOf(info->result);
     strela::BindingStoreOp::create(
       builder, info->resultOp->getLoc(), info->kernelOp->getResult(0),
-      static_cast<int64_t>(info->result.binding), offsetsAttrOf(info->result),
-      byteOffsetAttrOf(info->result)
+      static_cast<int64_t>(info->result.binding), ordinalAttr, byteOffsetAttr
     );
     info->resultOp->erase();
 

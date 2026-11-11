@@ -225,59 +225,107 @@ iree_hal_strela_command_buffer_collective(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED, __func__);
 }
 
-// Where one CGRA column reads or writes, resolved for a dispatch.
+// Where one CGRA column reads or writes, resolved for a dispatch. Workgroup id
+// (x, y, z) moves its first word sum(min(id[d] * step[d], limit[d])) bytes past
+// `offset`.
 typedef struct {
   // NULL for an unused column.
   iree_hal_strela_buffer_t *buffer;
-  // Byte offset of the first word in the allocated buffer.
+  // Byte offset of workgroup (0, 0, 0)'s first word in the allocated buffer.
   iree_device_size_t offset;
-  // Bytes from the first to the last word the column touches.
+  // Bytes from there to the last word any workgroup touches.
   iree_device_size_t length;
-  // What libstrela takes: words from the base of STRELA memory.
-  size_t words_from_base;
+  uint64_t step[3];
+  uint64_t limit[3];
   size_t word_count;
-  size_t stride;
+  size_t word_stride;
 } iree_hal_strela_column_t;
 
 static iree_status_t
+iree_hal_strela_value_get(
+  iree_hal_strela_ValueDef_struct_t def,
+  iree_const_byte_span_t constants,
+  uint32_t *out_value
+) {
+  uint32_t value = iree_hal_strela_ValueDef_value_get(def);
+  if (iree_hal_strela_ValueDef_is_constant_get(def)) {
+    if (value >= constants.data_length / sizeof(uint32_t)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "push constant %u is missing", value);
+    }
+    memcpy(&value, constants.data + value * sizeof(uint32_t), sizeof value);
+  }
+  *out_value = value;
+  return iree_ok_status();
+}
+
+// Bytes workgroup `id` moves the column's first word.
+static uint64_t
+iree_hal_strela_column_shift(const iree_hal_strela_column_t *column, const uint32_t id[3]) {
+  uint64_t shift = 0;
+  for (int d = 0; d < 3; ++d) {
+    shift += iree_min((uint64_t)id[d] * column->step[d], (uint64_t)column->limit[d]);
+  }
+  return shift;
+}
+
+// `word_stride` is NULL for outputs. Every workgroup count must be at least 1.
+static iree_status_t
 iree_hal_strela_column_resolve(
-  iree_hal_strela_ColumnDef_table_t def,
-  bool is_input,
+  iree_hal_strela_AddressDef_table_t address,
+  iree_hal_strela_ValueDef_struct_t word_count,
+  iree_hal_strela_ValueDef_struct_t word_stride,
+  const uint32_t workgroup_count[3],
   iree_const_byte_span_t constants,
   iree_hal_buffer_ref_list_t bindings,
   iree_hal_strela_column_t *out_column
 ) {
   memset(out_column, 0, sizeof *out_column);
-  out_column->word_count = iree_hal_strela_ColumnDef_word_count_get(def);
-  out_column->stride = is_input ? iree_hal_strela_ColumnDef_stride_get(def) : 0;
+  uint32_t value = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_strela_value_get(word_count, constants, &value));
+  out_column->word_count = value;
+  value = 1;
+  if (word_stride) {
+    IREE_RETURN_IF_ERROR(iree_hal_strela_value_get(word_stride, constants, &value));
+  }
+  out_column->word_stride = value;
   if (out_column->word_count == 0) {
     return iree_ok_status();
   }
 
-  uint32_t binding = iree_hal_strela_ColumnDef_binding_get(def);
+  uint32_t binding = iree_hal_strela_AddressDef_binding_get(address);
   if (binding >= bindings.count || !bindings.values[binding].buffer) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "binding %u is missing", binding);
   }
   iree_hal_buffer_ref_t ref = bindings.values[binding];
 
-  // Compile-time part, then the [offset] or [low, high] push constants of a
-  // runtime one.
-  uint64_t byte_offset = iree_hal_strela_ColumnDef_byte_offset_get(def);
-  flatbuffers_uint32_vec_t ordinals = iree_hal_strela_ColumnDef_offset_constants_get(def);
-  const uint32_t *values = (const uint32_t *)constants.data;
-  for (size_t i = 0; i < flatbuffers_uint32_vec_len(ordinals); ++i) {
-    size_t ordinal = flatbuffers_uint32_vec_at(ordinals, i);
-    if ((ordinal + 1) * sizeof(uint32_t) > constants.data_length) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "missing push constants");
-    }
-    byte_offset += (uint64_t)values[ordinal] << (32 * i);
+  uint32_t byte_offset = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_strela_value_get(
+    iree_hal_strela_AddressDef_offset_get(address), constants, &byte_offset
+  ));
+  iree_hal_strela_WorkgroupTermDef_struct_t terms[3] = {
+    iree_hal_strela_AddressDef_workgroup_x_get(address),
+    iree_hal_strela_AddressDef_workgroup_y_get(address),
+    iree_hal_strela_AddressDef_workgroup_z_get(address),
+  };
+  uint32_t last_id[3];
+  for (int d = 0; d < 3; ++d) {
+    IREE_RETURN_IF_ERROR(iree_hal_strela_value_get(
+      iree_hal_strela_WorkgroupTermDef_step_get(terms[d]), constants, &value
+    ));
+    out_column->step[d] = value;
+    IREE_RETURN_IF_ERROR(iree_hal_strela_value_get(
+      iree_hal_strela_WorkgroupTermDef_limit_get(terms[d]), constants, &value
+    ));
+    out_column->limit[d] = value;
+    last_id[d] = workgroup_count[d] - 1;
   }
 
-  // An input reads one word in every `stride`, the first one repeatedly for 0.
-  size_t span_words = is_input && out_column->stride != 1
-    ? (out_column->word_count - 1) * out_column->stride + 1
-    : out_column->word_count;
-  out_column->length = span_words * sizeof(strela_word);
+  // Every term grows with the id, so the last workgroup reaches farthest. The
+  // driver sizes a stride of 0 as a stride of 1 (DESIGN.md D8).
+  uint64_t stride = out_column->word_stride ? out_column->word_stride : 1;
+  uint64_t span_words = (uint64_t)(out_column->word_count - 1) * stride + 1;
+  out_column->length =
+    iree_hal_strela_column_shift(out_column, last_id) + span_words * sizeof(strela_word);
 
   iree_device_size_t length = ref.length == IREE_HAL_WHOLE_BUFFER
     ? iree_hal_buffer_byte_length(ref.buffer) - ref.offset : ref.length;
@@ -298,15 +346,82 @@ iree_hal_strela_column_resolve(
       binding
     );
   }
-  if (out_column->offset % sizeof(strela_word) != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "binding %u is not word aligned", binding);
-  }
   out_column->buffer = buffer;
-  out_column->words_from_base =
-    buffer->s_buf.offset_words_from_base + out_column->offset / sizeof(strela_word);
   return iree_ok_status();
 }
 
+// What libstrela takes for workgroup `id`: words from the base of STRELA memory.
+static iree_status_t
+iree_hal_strela_column_place(
+  const iree_hal_strela_column_t *column,
+  const uint32_t id[3],
+  size_t *out_words_from_base
+) {
+  *out_words_from_base = 0;
+  if (!column->buffer) return iree_ok_status();
+  uint64_t offset = column->offset + iree_hal_strela_column_shift(column, id);
+  if (offset % sizeof(strela_word) != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "column is not word aligned");
+  }
+  *out_words_from_base = column->buffer->s_buf.offset_words_from_base + offset / sizeof(strela_word);
+  return iree_ok_status();
+}
+
+// Runs one job to completion.
+static iree_status_t
+iree_hal_strela_job_run(strela_dev *dev, strela_kernel kernel, strela_conf *conf) {
+  strela_job job = strela_job_config(dev, kernel, conf);
+  strela_job_submit(dev, job);
+  // The driver's timeout bounds this: a job that hangs is cancelled.
+  strela_job_wait(dev, job, -1);
+  iree_status_t status = iree_hal_strela_status_from_dev(dev, "running a STRELA job");
+
+  if (iree_status_is_ok(status)) {
+    strela_job_state state = strela_job_poll(dev, job);
+    status = iree_hal_strela_status_from_dev(dev, "polling a STRELA job");
+    if (iree_status_is_ok(status) && state != STRELA_JOB_OK) {
+      status = iree_make_status(
+        IREE_STATUS_ABORTED,
+        "STRELA job %s (the driver cancels jobs that do not finish in time)",
+        state == STRELA_JOB_PENDING ? "did not finish" : "failed"
+      );
+    }
+  }
+
+  if (job.valid) {
+    strela_job_free(dev, job);
+    status = iree_status_join(status, iree_hal_strela_status_from_dev(dev, "freeing a STRELA job"));
+  }
+  return status;
+}
+
+static iree_status_t
+iree_hal_strela_job_run_workgroup(
+  strela_dev *dev,
+  strela_kernel kernel,
+  const iree_hal_strela_column_t inputs[IREE_HAL_STRELA_COLUMN_COUNT],
+  const iree_hal_strela_column_t outputs[IREE_HAL_STRELA_COLUMN_COUNT],
+  const uint32_t id[3]
+) {
+  size_t in[IREE_HAL_STRELA_COLUMN_COUNT], out[IREE_HAL_STRELA_COLUMN_COUNT];
+  for (size_t c = 0; c < IREE_HAL_STRELA_COLUMN_COUNT; ++c) {
+    IREE_RETURN_IF_ERROR(iree_hal_strela_column_place(&inputs[c], id, &in[c]));
+    IREE_RETURN_IF_ERROR(iree_hal_strela_column_place(&outputs[c], id, &out[c]));
+  }
+  strela_conf conf = {
+    .inp0_offset = in[0], .inp0_count = inputs[0].word_count, .inp0_stride = inputs[0].word_stride,
+    .inp1_offset = in[1], .inp1_count = inputs[1].word_count, .inp1_stride = inputs[1].word_stride,
+    .inp2_offset = in[2], .inp2_count = inputs[2].word_count, .inp2_stride = inputs[2].word_stride,
+    .inp3_offset = in[3], .inp3_count = inputs[3].word_count, .inp3_stride = inputs[3].word_stride,
+    .out0_offset = out[0], .out0_count = outputs[0].word_count,
+    .out1_offset = out[1], .out1_count = outputs[1].word_count,
+    .out2_offset = out[2], .out2_count = outputs[2].word_count,
+    .out3_offset = out[3], .out3_count = outputs[3].word_count,
+  };
+  return iree_hal_strela_job_run(dev, kernel, &conf);
+}
+
+// One STRELA job per workgroup, one after the other.
 static iree_status_t
 iree_hal_strela_command_buffer_dispatch(
   iree_hal_command_buffer_t *base_command_buffer,
@@ -325,20 +440,35 @@ iree_hal_strela_command_buffer_dispatch(
   iree_hal_strela_column_t inputs[IREE_HAL_STRELA_COLUMN_COUNT];
   iree_hal_strela_column_t outputs[IREE_HAL_STRELA_COLUMN_COUNT];
 
+  if (iree_hal_dispatch_uses_indirect_parameters(dispatch_flags)
+      || iree_hal_dispatch_uses_custom_arguments(dispatch_flags)) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "indirect or custom STRELA dispatch");
+  }
   if (executable_function.value >= executable->export_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "no such STRELA function");
   }
+  const uint32_t *count = dispatch_config.workgroup_count;
+  if (count[0] == 0 || count[1] == 0 || count[2] == 0) {
+    return iree_ok_status();
+  }
   const iree_hal_strela_export_t *export = &executable->exports[executable_function.value];
-  iree_hal_strela_ColumnDef_vec_t input_defs = iree_hal_strela_ExportDef_inputs_get(export->def);
-  iree_hal_strela_ColumnDef_vec_t output_defs = iree_hal_strela_ExportDef_outputs_get(export->def);
+  iree_hal_strela_InputColumnDef_vec_t input_defs = iree_hal_strela_ExportDef_inputs_get(export->def);
+  iree_hal_strela_OutputColumnDef_vec_t output_defs = iree_hal_strela_ExportDef_outputs_get(export->def);
 
   for (size_t c = 0; iree_status_is_ok(status) && c < IREE_HAL_STRELA_COLUMN_COUNT; ++c) {
+    iree_hal_strela_InputColumnDef_table_t input = iree_hal_strela_InputColumnDef_vec_at(input_defs, c);
+    iree_hal_strela_OutputColumnDef_table_t output = iree_hal_strela_OutputColumnDef_vec_at(output_defs, c);
     status = iree_hal_strela_column_resolve(
-      iree_hal_strela_ColumnDef_vec_at(input_defs, c), true, constants, bindings, &inputs[c]
+      iree_hal_strela_InputColumnDef_address_get(input),
+      iree_hal_strela_InputColumnDef_word_count_get(input),
+      iree_hal_strela_InputColumnDef_word_stride_get(input),
+      count, constants, bindings, &inputs[c]
     );
     if (iree_status_is_ok(status)) {
       status = iree_hal_strela_column_resolve(
-        iree_hal_strela_ColumnDef_vec_at(output_defs, c), false, constants, bindings, &outputs[c]
+        iree_hal_strela_OutputColumnDef_address_get(output),
+        iree_hal_strela_OutputColumnDef_word_count_get(output),
+        NULL, count, constants, bindings, &outputs[c]
       );
     }
   }
@@ -358,41 +488,13 @@ iree_hal_strela_command_buffer_dispatch(
     }
   }
 
-  strela_job job;
-  memset(&job, 0, sizeof job);
-  if (iree_status_is_ok(status)) {
-    strela_conf conf = {
-      .inp0_offset = inputs[0].words_from_base, .inp0_count = inputs[0].word_count, .inp0_stride = inputs[0].stride,
-      .inp1_offset = inputs[1].words_from_base, .inp1_count = inputs[1].word_count, .inp1_stride = inputs[1].stride,
-      .inp2_offset = inputs[2].words_from_base, .inp2_count = inputs[2].word_count, .inp2_stride = inputs[2].stride,
-      .inp3_offset = inputs[3].words_from_base, .inp3_count = inputs[3].word_count, .inp3_stride = inputs[3].stride,
-      .out0_offset = outputs[0].words_from_base, .out0_count = outputs[0].word_count,
-      .out1_offset = outputs[1].words_from_base, .out1_count = outputs[1].word_count,
-      .out2_offset = outputs[2].words_from_base, .out2_count = outputs[2].word_count,
-      .out3_offset = outputs[3].words_from_base, .out3_count = outputs[3].word_count,
-    };
-    job = strela_job_config(dev, export->kernel, &conf);
-    strela_job_submit(dev, job);
-    // The driver's timeout bounds this: a job that hangs is cancelled.
-    strela_job_wait(dev, job, -1);
-    status = iree_hal_strela_status_from_dev(dev, "running a STRELA job");
-  }
-
-  if (iree_status_is_ok(status)) {
-    strela_job_state state = strela_job_poll(dev, job);
-    status = iree_hal_strela_status_from_dev(dev, "polling a STRELA job");
-    if (iree_status_is_ok(status) && state != STRELA_JOB_OK) {
-      status = iree_make_status(
-        IREE_STATUS_ABORTED,
-        "STRELA job %s (the driver cancels jobs that do not finish in time)",
-        state == STRELA_JOB_PENDING ? "did not finish" : "failed"
-      );
+  uint32_t id[3];
+  for (id[2] = 0; iree_status_is_ok(status) && id[2] < count[2]; ++id[2]) {
+    for (id[1] = 0; iree_status_is_ok(status) && id[1] < count[1]; ++id[1]) {
+      for (id[0] = 0; iree_status_is_ok(status) && id[0] < count[0]; ++id[0]) {
+        status = iree_hal_strela_job_run_workgroup(dev, export->kernel, inputs, outputs, id);
+      }
     }
-  }
-
-  if (job.valid) {
-    strela_job_free(dev, job);
-    status = iree_status_join(status, iree_hal_strela_status_from_dev(dev, "freeing a STRELA job"));
   }
 
   // The CPU must see what the device wrote.

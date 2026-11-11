@@ -4,29 +4,49 @@ namespace iree.hal.strela;
 file_identifier "STR1";
 file_extension "str1";
 
-// Where one CGRA column reads or writes. The address is
-//   binding base + byte_offset + (push constants offset_constants[0..1])
-// with the push constants holding a byte offset that only becomes known at
-// dispatch time: one when it fits in 32 bits, else its low and high halves.
-table ColumnDef {
-  binding:uint32;            // Ordinal in the dispatch binding list.
-  byte_offset:uint64;        // Offset known at compile time, in bytes.
-  offset_constants:[uint32]; // Empty, [offset] or [low, high] push constant ordinals of a runtime offset.
-  word_count:uint32;         // Words moved by the column; 0 leaves the column unused.
-  stride:uint32;             // Inputs only: one word in every `stride`; 0 repeats the first word.
+// immediate value, or constants[value] when is_constant
+struct ValueDef { value:uint32; is_constant:bool; }
+
+// Parameters of min(d * step, limit) where d in {x,y,z}
+struct WorkgroupTermDef { step:ValueDef; limit:ValueDef; }
+
+// Bytes from the start of the binding:
+//   offset + sum(min(d * step, limit) for d in {x,y,z})
+// d is the workgroup id along that dimension, known only at dispatch
+table AddressDef {
+  binding:uint32;
+  offset:ValueDef (required);
+  workgroup_x:WorkgroupTermDef (required);
+  workgroup_y:WorkgroupTermDef (required);
+  workgroup_z:WorkgroupTermDef (required);
+}
+
+table InputColumnDef  {
+  address:AddressDef (required);
+  word_count:ValueDef (required);
+  word_stride:ValueDef (required);
+}
+
+table OutputColumnDef {
+  address:AddressDef (required);
+  word_count:ValueDef (required);
 }
 
 table ExportDef {
-  name:string;        // The name hal.executable.lookup.function asks for.
-  bitstream:[uint32]; // The CGRA configuration, STRELA_KERNEL_SIZE words.
-  inputs:[ColumnDef]; // Exactly four of each, indexed by CGRA column.
-  outputs:[ColumnDef];
-  constant_count:uint32;
-  binding_count:uint32;
+  name:string (required); // The name hal.executable.lookup.function asks for.
+
+  bitstream:[uint32] (required);        // The configuration bitstream
+  inputs:[InputColumnDef] (required);   // Exactly four.
+  outputs:[OutputColumnDef] (required); // Exactly four.
+
+  // In the .dispatch member of iree_hal_command_buffer_vtable_t two arguments
+  // are arrays of unknown size.
+  constant_count:uint32; // sizes iree_const_byte_span_t constants
+  binding_count:uint32;  // sizes iree_hal_buffer_ref_list_t bindings
 }
 
 table ExecutableDef {
-  exports:[ExportDef];
+  exports:[ExportDef] (required); // Linking stitches many executables together
 }
 
 root_type ExecutableDef;

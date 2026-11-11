@@ -8,6 +8,7 @@
 #include "mlir/IR/Builders.h"
 
 #include "estela/StrelaIR/StrelaOps.h"
+#include "estela/Utils/Bitstreams.h"
 
 namespace mlir::estela {
 #define GEN_PASS_DEF_RESOLVEWORKGROUPCOUNTPASS
@@ -16,11 +17,9 @@ namespace mlir::estela {
 
 using namespace mlir;
 using namespace mlir::iree_compiler;
+using mlir::estela::strelaMatvecFeaturesPerJob;
 
 namespace {
-
-// Output features one matvec job computes: output columns 1-3.
-constexpr int64_t strelaMatvecFeaturesPerJob = 3;
 
 // One count dimension as the region computes it: a constant if the size is
 // static, else the workload argument the dispatch body read that size from.

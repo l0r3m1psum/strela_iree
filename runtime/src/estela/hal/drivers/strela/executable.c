@@ -35,30 +35,65 @@ iree_hal_strela_executable_cast(iree_hal_executable_t *base_value) {
   return (iree_hal_strela_executable_t *)base_value;
 }
 
+// The flatcc verifier does not enforce (required) on struct fields, so a
+// missing ValueDef is caught here.
+static iree_status_t
+iree_hal_strela_value_verify(iree_hal_strela_ValueDef_struct_t value, uint32_t constant_count) {
+  if (!value) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "missing value");
+  }
+  if (iree_hal_strela_ValueDef_is_constant_get(value)
+      && iree_hal_strela_ValueDef_value_get(value) >= constant_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "push constant ordinal out of range");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+iree_hal_strela_term_verify(iree_hal_strela_WorkgroupTermDef_struct_t term, uint32_t constant_count) {
+  if (!term) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "missing workgroup term");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_strela_value_verify(
+    iree_hal_strela_WorkgroupTermDef_step_get(term), constant_count
+  ));
+  return iree_hal_strela_value_verify(
+    iree_hal_strela_WorkgroupTermDef_limit_get(term), constant_count
+  );
+}
+
+// `word_stride` is NULL for outputs, which have none.
 static iree_status_t
 iree_hal_strela_column_verify(
-  iree_hal_strela_ColumnDef_table_t column,
+  iree_hal_strela_AddressDef_table_t address,
+  iree_hal_strela_ValueDef_struct_t word_count,
+  iree_hal_strela_ValueDef_struct_t word_stride,
+  bool is_input,
   uint32_t binding_count,
   uint32_t constant_count
 ) {
-  if (iree_hal_strela_ColumnDef_word_count_get(column) == 0) {
-    return iree_ok_status();
+  IREE_RETURN_IF_ERROR(iree_hal_strela_value_verify(word_count, constant_count));
+  if (is_input) {
+    IREE_RETURN_IF_ERROR(iree_hal_strela_value_verify(word_stride, constant_count));
   }
-  if (iree_hal_strela_ColumnDef_binding_get(column) >= binding_count) {
+  IREE_RETURN_IF_ERROR(iree_hal_strela_value_verify(
+    iree_hal_strela_AddressDef_offset_get(address), constant_count
+  ));
+  IREE_RETURN_IF_ERROR(iree_hal_strela_term_verify(
+    iree_hal_strela_AddressDef_workgroup_x_get(address), constant_count
+  ));
+  IREE_RETURN_IF_ERROR(iree_hal_strela_term_verify(
+    iree_hal_strela_AddressDef_workgroup_y_get(address), constant_count
+  ));
+  IREE_RETURN_IF_ERROR(iree_hal_strela_term_verify(
+    iree_hal_strela_AddressDef_workgroup_z_get(address), constant_count
+  ));
+
+  // An unused column may name any binding.
+  bool unused = !iree_hal_strela_ValueDef_is_constant_get(word_count)
+    && iree_hal_strela_ValueDef_value_get(word_count) == 0;
+  if (!unused && iree_hal_strela_AddressDef_binding_get(address) >= binding_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "column binding out of range");
-  }
-  if (iree_hal_strela_ColumnDef_byte_offset_get(column) % sizeof(strela_word) != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "column offset is not word aligned");
-  }
-  flatbuffers_uint32_vec_t constants = iree_hal_strela_ColumnDef_offset_constants_get(column);
-  size_t constants_len = flatbuffers_uint32_vec_len(constants);
-  if (constants_len > 2) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "a runtime offset takes one or two constants");
-  }
-  for (size_t i = 0; i < constants_len; ++i) {
-    if (flatbuffers_uint32_vec_at(constants, i) >= constant_count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "offset constant out of range");
-    }
   }
   return iree_ok_status();
 }
@@ -93,10 +128,10 @@ iree_hal_strela_executable_flatbuffer_verify(iree_const_byte_span_t flatbuffer_d
         i, STRELA_KERNEL_SIZE
       );
     }
-    iree_hal_strela_ColumnDef_vec_t inputs = iree_hal_strela_ExportDef_inputs_get(export_def);
-    iree_hal_strela_ColumnDef_vec_t outputs = iree_hal_strela_ExportDef_outputs_get(export_def);
-    if (iree_hal_strela_ColumnDef_vec_len(inputs) != IREE_HAL_STRELA_COLUMN_COUNT
-        || iree_hal_strela_ColumnDef_vec_len(outputs) != IREE_HAL_STRELA_COLUMN_COUNT) {
+    iree_hal_strela_InputColumnDef_vec_t inputs = iree_hal_strela_ExportDef_inputs_get(export_def);
+    iree_hal_strela_OutputColumnDef_vec_t outputs = iree_hal_strela_ExportDef_outputs_get(export_def);
+    if (iree_hal_strela_InputColumnDef_vec_len(inputs) != IREE_HAL_STRELA_COLUMN_COUNT
+        || iree_hal_strela_OutputColumnDef_vec_len(outputs) != IREE_HAL_STRELA_COLUMN_COUNT) {
       return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT, "export %zu: expected %d input and output columns",
         i, IREE_HAL_STRELA_COLUMN_COUNT
@@ -105,12 +140,19 @@ iree_hal_strela_executable_flatbuffer_verify(iree_const_byte_span_t flatbuffer_d
     uint32_t binding_count = iree_hal_strela_ExportDef_binding_count_get(export_def);
     uint32_t constant_count = iree_hal_strela_ExportDef_constant_count_get(export_def);
     for (size_t c = 0; c < IREE_HAL_STRELA_COLUMN_COUNT; ++c) {
+      iree_hal_strela_InputColumnDef_table_t input = iree_hal_strela_InputColumnDef_vec_at(inputs, c);
+      iree_hal_strela_OutputColumnDef_table_t output = iree_hal_strela_OutputColumnDef_vec_at(outputs, c);
       IREE_RETURN_IF_ERROR(iree_hal_strela_column_verify(
-        iree_hal_strela_ColumnDef_vec_at(inputs, c), binding_count, constant_count
-      ));
+        iree_hal_strela_InputColumnDef_address_get(input),
+        iree_hal_strela_InputColumnDef_word_count_get(input),
+        iree_hal_strela_InputColumnDef_word_stride_get(input),
+        true, binding_count, constant_count
+      ), "export %zu: input column %zu", i, c);
       IREE_RETURN_IF_ERROR(iree_hal_strela_column_verify(
-        iree_hal_strela_ColumnDef_vec_at(outputs, c), binding_count, constant_count
-      ));
+        iree_hal_strela_OutputColumnDef_address_get(output),
+        iree_hal_strela_OutputColumnDef_word_count_get(output),
+        NULL, false, binding_count, constant_count
+      ), "export %zu: output column %zu", i, c);
     }
   }
   return iree_ok_status();

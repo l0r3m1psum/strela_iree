@@ -53,10 +53,9 @@ def MatvecOp : Strela_Op<"matvec", [Pure]> {
 //     FuseDispatchBindings produces these when it merges several operands into
 //     one buffer and every dispatch site of the executable agrees on where each
 //     one sits, so the offset folds to an `arith.constant`.
-//   * `offsets`: the push constant ordinals of an offset that differs per
-//     dispatch site, either the low and high halves of a 64 bit offset or a
-//     single one when Stream proved it fits in 32 bits. The pair is not
-//     necessarily adjacent because IREE dedupes the constant loads.
+//   * `offset_ordinal`: the push constant holding an offset that differs per
+//     dispatch site. One 32 bit constant, which is what the executable format
+//     can describe.
 class Strela_BindingOp<string mnemonic, list<Trait> traits = []> :
     Strela_Op<mnemonic, traits>;
 
@@ -71,18 +70,18 @@ def BindingLoadOp : Strela_BindingOp<"binding_load", [Pure]> {
     directly instead of having to be recovered from the surrounding IR.
 
     ```mlir
-    %0 = strela.binding_load binding(0) offsets [0, 1] : tensor<?x9xi32>
+    %0 = strela.binding_load binding(0) offset_ordinal 1 : tensor<?x9xi32>
     %1 = strela.binding_load binding(0) byte_offset 320 : tensor<72xi32>
     ```
   }];
   let arguments = (ins
     I64Attr:$binding,
-    OptionalAttr<DenseI64ArrayAttr>:$offsets,
+    OptionalAttr<I64Attr>:$offset_ordinal,
     OptionalAttr<I64Attr>:$byte_offset
   );
   let results = (outs I32Tensor:$result);
   let assemblyFormat = [{
-    `binding` `(` $binding `)` (`offsets` $offsets^)?
+    `binding` `(` $binding `)` (`offset_ordinal` $offset_ordinal^)?
     (`byte_offset` $byte_offset^)? attr-dict `:` type($result)
   }];
   let hasVerifier = 1;
@@ -97,18 +96,18 @@ def BindingStoreOp : Strela_BindingOp<"binding_store"> {
     be folded away.
 
     ```mlir
-    strela.binding_store %0, binding(1) offsets [0, 2] : tensor<?x9xi32>
+    strela.binding_store %0, binding(1) offset_ordinal 2 : tensor<?x9xi32>
     strela.binding_store %1, binding(1) byte_offset 320 : tensor<72xi32>
     ```
   }];
   let arguments = (ins
     I32Tensor:$value,
     I64Attr:$binding,
-    OptionalAttr<DenseI64ArrayAttr>:$offsets,
+    OptionalAttr<I64Attr>:$offset_ordinal,
     OptionalAttr<I64Attr>:$byte_offset
   );
   let assemblyFormat = [{
-    $value `,` `binding` `(` $binding `)` (`offsets` $offsets^)?
+    $value `,` `binding` `(` $binding `)` (`offset_ordinal` $offset_ordinal^)?
     (`byte_offset` $byte_offset^)? attr-dict `:` type($value)
   }];
   let hasVerifier = 1;

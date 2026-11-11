@@ -3,23 +3,25 @@
 namespace mlir::strela {
 
 // Both binding ops describe their byte offset the same way: at most one of the
-// two optional attributes, with neither meaning a compile-time zero.
+// two optional attributes, with neither meaning a compile-time zero. Both fit
+// the 32 bit ValueDef of the executable format.
 static LogicalResult
-verifyBindingOffsets(Operation *op, std::optional<ArrayRef<int64_t>> offsets,
+verifyBindingOffsets(Operation *op, std::optional<uint64_t> offsetOrdinal,
                      std::optional<uint64_t> byteOffset) {
-  if (offsets && offsets->size() != 1 && offsets->size() != 2) {
+  if (offsetOrdinal && byteOffset) {
     return op->emitOpError()
-           << "expected one offset ordinal, or two for the low and high halves "
-              "of the byte offset, but got " << offsets->size();
-  }
-  if (offsets && byteOffset) {
-    return op->emitOpError()
-           << "carries both push constant offset ordinals and a static byte "
+           << "carries both a push constant offset ordinal and a static byte "
               "offset; the offset comes from one place or the other";
+  }
+  if (offsetOrdinal && *offsetOrdinal > UINT32_MAX) {
+    return op->emitOpError() << "offset ordinal does not fit in 32 bits";
   }
   if (byteOffset && *byteOffset == 0) {
     return op->emitOpError()
            << "a zero byte offset is expressed by omitting the attribute";
+  }
+  if (byteOffset && *byteOffset > UINT32_MAX) {
+    return op->emitOpError() << "byte offset does not fit in 32 bits";
   }
   return success();
 }
@@ -51,11 +53,11 @@ LogicalResult MatvecOp::verify() {
 }
 
 LogicalResult BindingLoadOp::verify() {
-  return verifyBindingOffsets(*this, getOffsets(), getByteOffset());
+  return verifyBindingOffsets(*this, getOffsetOrdinal(), getByteOffset());
 }
 
 LogicalResult BindingStoreOp::verify() {
-  return verifyBindingOffsets(*this, getOffsets(), getByteOffset());
+  return verifyBindingOffsets(*this, getOffsetOrdinal(), getByteOffset());
 }
 
 } // namespace mlir::strela

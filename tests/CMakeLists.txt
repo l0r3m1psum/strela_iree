@@ -22,6 +22,7 @@ iree_lit_test_suite(
     "runtime/strela_transfer.mlir"
     "end2end.mlir"
     "serialization.mlir"
+    "serialization_matvec.mlir"
   TOOLS
     FileCheck
     estela::tools::estela-dump-executable

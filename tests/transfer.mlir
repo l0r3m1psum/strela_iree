@@ -153,10 +153,10 @@ module {
 //
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
-// CHECK:     %[[S_LHS:.+]] = strela.binding_load binding(0) offsets [{{[0-9]+}}] : tensor<72xi32>
-// CHECK:     %[[S_RHS:.+]] = strela.binding_load binding(0) offsets [{{[0-9]+}}] : tensor<72xi32>
+// CHECK:     %[[S_LHS:.+]] = strela.binding_load binding(0) offset_ordinal {{[0-9]+}} : tensor<72xi32>
+// CHECK:     %[[S_RHS:.+]] = strela.binding_load binding(0) offset_ordinal {{[0-9]+}} : tensor<72xi32>
 // CHECK:     %[[S_SUM:.+]] = strela.add %[[S_LHS]], %[[S_RHS]] : tensor<72xi32>
-// CHECK:     strela.binding_store %[[S_SUM]], binding(1) offsets [{{[0-9]+}}] : tensor<72xi32>
+// CHECK:     strela.binding_store %[[S_SUM]], binding(1) offset_ordinal {{[0-9]+}} : tensor<72xi32>
 
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}

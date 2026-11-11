@@ -38,58 +38,74 @@ func.func @add(%a: tensor<16xi32>, %b: tensor<16xi32>) -> tensor<16xi32> {
 // The CGRA configuration, STRELA_KERNEL_SIZE (80) words; not checked here.
 // CHECK-NEXT:       "bitstream": [
 
-// Four inputs and four outputs, one per CGRA column. FuseDispatchBindings put
-// both operands in binding 0: %b starts 64 bytes after %a (16 words rounded up
-// to the 64 byte min_buffer_offset_alignment), a constant offset so no push
-// constants are involved. The add kernel reads columns 0 and 1.
+// Four inputs and four outputs, one per CGRA column. Every number is a ValueDef:
+// an immediate, or with is_constant the ordinal of the push constant holding
+// it. Addresses are in bytes, counts and strides in words.
+//
+// The first column is spelled out in full. %a starts at byte 0 of binding 0.
+// The add runs as a single workgroup, so every workgroup term is step 0 with
+// no clamp (limit 2^32 - 1).
 // CHECK:            "inputs": [{
-// CHECK-NEXT:           "binding": 0,
-// CHECK-NEXT:           "byte_offset": 0,
-// CHECK-NEXT:           "offset_constants": [
-// CHECK-NEXT:           ],
-// CHECK-NEXT:           "word_count": 16,
-// CHECK-NEXT:           "stride": 1
-// CHECK-NEXT:         },{
-// CHECK-NEXT:           "binding": 0,
-// CHECK-NEXT:           "byte_offset": 64,
-// CHECK-NEXT:           "offset_constants": [
-// CHECK-NEXT:           ],
-// CHECK-NEXT:           "word_count": 16,
-// CHECK-NEXT:           "stride": 1
+// CHECK-NEXT:           "address": {
+// CHECK-NEXT:             "binding": 0,
+// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:               "value": 0,
+// CHECK-NEXT:               "is_constant": false
+// CHECK-NEXT:             },
+// CHECK-NEXT:             "workgroup_x": {
+// CHECK-NEXT:               "step": {
+// CHECK-NEXT:                 "value": 0,
+// CHECK-NEXT:                 "is_constant": false
+// CHECK-NEXT:               },
+// CHECK-NEXT:               "limit": {
+// CHECK-NEXT:                 "value": 4294967295,
+// CHECK-NEXT:                 "is_constant": false
+// CHECK-NEXT:               }
+// CHECK-NEXT:             },
+// CHECK-NEXT:             "workgroup_y": {
+// CHECK:                  "workgroup_z": {
+// CHECK:                "word_count": {
+// CHECK-NEXT:             "value": 16,
+// CHECK-NEXT:             "is_constant": false
+// CHECK-NEXT:           },
+// CHECK-NEXT:           "word_stride": {
+// CHECK-NEXT:             "value": 1,
+// CHECK-NEXT:             "is_constant": false
+// CHECK-NEXT:           }
 
-// A word_count of 0 leaves a column unused.
+// FuseDispatchBindings put both operands in binding 0: %b starts 64 bytes after
+// %a (16 words rounded up to the 64 byte min_buffer_offset_alignment), a
+// constant offset so no push constants are involved. The add kernel reads
+// columns 0 and 1.
 // CHECK-NEXT:         },{
-// CHECK-NEXT:           "binding": 0,
-// CHECK-NEXT:           "byte_offset": 0,
-// CHECK-NEXT:           "offset_constants": [
-// CHECK-NEXT:           ],
-// CHECK-NEXT:           "word_count": 0,
-// CHECK-NEXT:           "stride": 0
-// CHECK-NEXT:         },{
-// CHECK-NEXT:           "binding": 0,
-// CHECK-NEXT:           "byte_offset": 0,
-// CHECK-NEXT:           "offset_constants": [
-// CHECK-NEXT:           ],
-// CHECK-NEXT:           "word_count": 0,
-// CHECK-NEXT:           "stride": 0
-// CHECK-NEXT:         }
-// CHECK-NEXT:       ],
+// CHECK-NEXT:           "address": {
+// CHECK-NEXT:             "binding": 0,
+// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:               "value": 64,
+// CHECK:                "word_count": {
+// CHECK-NEXT:             "value": 16,
 
-// The sum leaves by column 1 into binding 1. Outputs have no stride.
-// CHECK-NEXT:       "outputs": [{
-// CHECK-NEXT:           "binding": 0,
-// CHECK-NEXT:           "byte_offset": 0,
-// CHECK-NEXT:           "offset_constants": [
-// CHECK-NEXT:           ],
-// CHECK-NEXT:           "word_count": 0,
-// CHECK-NEXT:           "stride": 0
+// A word count of 0 leaves a column unused; its other fields are still present.
+// CHECK:              },{
+// CHECK:                "word_count": {
+// CHECK-NEXT:             "value": 0,
+// CHECK:              },{
+// CHECK:                "word_count": {
+// CHECK-NEXT:             "value": 0,
+
+// The sum leaves by column 1 into binding 1. Outputs have no word_stride.
+// CHECK:            "outputs": [{
+// CHECK:                "word_count": {
+// CHECK-NEXT:             "value": 0,
+// CHECK-NEXT:             "is_constant": false
+// CHECK-NEXT:           }
 // CHECK-NEXT:         },{
-// CHECK-NEXT:           "binding": 1,
-// CHECK-NEXT:           "byte_offset": 0,
-// CHECK-NEXT:           "offset_constants": [
-// CHECK-NEXT:           ],
-// CHECK-NEXT:           "word_count": 16,
-// CHECK-NEXT:           "stride": 0
+// CHECK-NEXT:           "address": {
+// CHECK-NEXT:             "binding": 1,
+// CHECK:                "word_count": {
+// CHECK-NEXT:             "value": 16,
+// CHECK-NEXT:             "is_constant": false
+// CHECK-NEXT:           }
 // CHECK-NEXT:         },{
 
 // The pipeline layout: no push constants (every offset is static) and two

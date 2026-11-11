@@ -34,6 +34,7 @@
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
+// RUN:   --iree-stream-resource-index-bits=32 \
 // RUN:   --compile-to=executable-targets %s | FileCheck %s --enable-var-scope --check-prefix=EXC
 
 // RUNFIXME: iree-compile --split-input-file --iree-plugin=estela \
@@ -96,11 +97,21 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // PRE:         %{{.+}} = hal.tensor.export on(#hal.device.affinity<@[[CPU]]>) %[[SUM]]
 
 // After preprocessing data flow information is injected in the IR using the
-// flow dialect and linalg computations are gruupped in flow.executable. For the
-// moment we do not go in more detail here...
+// flow dialect and linalg computations are grouped in flow.executable. Also the
+// concept work groups appear at this point.
 
 // FLW-LABEL: module attributes {
-// TODO: flow test
+// FLW:         util.global private @cpu0 = #hal.device.target<"local", {{.+}}> : !hal.device
+// FLW:         util.global private @strela0 = #hal.device.target<"strela", {{.+}}> : !hal.device
+// FLW:         flow.executable private @[[BCAST_DISPATCH]] {
+// FLW:           flow.executable.export public @[[BCAST_WG_FUNC]] workgroups({{.+}}) -> (index, index, index) {
+// FLW:             %{{.+}}, %{{.+}}, %{{.+}} = %x, %y, %z = iree_tensor_ext.dispatch.workgroup_count_from_slice
+// FLW
+// FLW:           builtin.module {
+// FLW:             func.func @[[BCAST_DISPATCH_FUNC:.+]]({{.+}}) {
+// FWL:               %{{.+}} = linalg.generic
+// FWL:                 linalg.yield %{{.+}} : i32
+// TODO: keep writing the test.
 // TODO: talk about the flow.dispatch.tie_shape
 
 // After the data flow phase the parallelism in the dataflow graph is made
@@ -157,7 +168,7 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // EXC:             builtin.module {
 // EXC:               func.func @{{.+}}() {
 // EXC:                 %[[LHS:.+]] = strela.binding_load binding(0) : tensor<?xi32>
-// EXC:                 %[[RHS:.+]] = strela.binding_load binding(0) offsets [0, 1] : tensor<?xi32>
+// EXC:                 %[[RHS:.+]] = strela.binding_load binding(0) offset_ordinal 0 : tensor<?xi32>
 // EXC:                 %[[SUM:.+]] = strela.add %[[LHS]], %[[RHS]] : tensor<?xi32>
 // EXC:                 strela.binding_store %[[SUM]], binding(1) : tensor<?xi32>
 
