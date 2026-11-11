@@ -2,6 +2,8 @@
 #define STRELA_DIALECT_STRELA_STRELAOPS
 
 include "StrelaBase.td"
+include "StrelaAttrs.td"
+
 include "mlir/Interfaces/InferTypeOpInterface.td"  // SameOperandsAndResultType
 include "mlir/Interfaces/SideEffectInterfaces.td"  // Pure
 

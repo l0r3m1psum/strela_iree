@@ -8,6 +8,8 @@ iree_tablegen_library(
     --gen-dialect-defs StrelaDialect.cpp.inc
     --gen-op-decls StrelaOps.h.inc
     --gen-op-defs StrelaOps.cpp.inc
+    --gen-attrdef-decls StrelaAttrs.h.inc
+    --gen-attrdef-defs StrelaAttrs.cpp.inc
 )
 
 # The generated op definitions are compiled here and only here; everything that
@@ -18,9 +20,11 @@ iree_cc_library(
   HDRS
     "StrelaDialect.h"
     "StrelaOps.h"
+    "StrelaAttrs.h"
   SRCS
     "StrelaDialect.cpp"
     "StrelaOps.cpp"
+    "StrelaAttrs.cpp"
   INCLUDES
     # The .inc files land next to the sources in the build tree and are included
     # by bare name; PUBLIC so consumers of StrelaOps.h inherit the path.

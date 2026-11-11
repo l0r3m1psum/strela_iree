@@ -1,6 +1,7 @@
 #include "estela/StrelaIR/StrelaDialect.h"
 
 #include "estela/StrelaIR/StrelaOps.h"
+#include "estela/StrelaIR/StrelaAttrs.h"
 
 #include "StrelaDialect.cpp.inc"
 
@@ -11,6 +12,7 @@ void StrelaDialect::initialize() {
 #define GET_OP_LIST
 #include "StrelaOps.cpp.inc"
   >();
+  registerAttributes();
 }
 
 } // namespace mlir::strela
