@@ -103,12 +103,11 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // FLW-LABEL: module attributes {
 // FLW:         util.global private @cpu0 = #hal.device.target<"local", {{.+}}> : !hal.device
 // FLW:         util.global private @strela0 = #hal.device.target<"strela", {{.+}}> : !hal.device
-// FLW:         flow.executable private @[[BCAST_DISPATCH]] {
-// FLW:           flow.executable.export public @[[BCAST_WG_FUNC]] workgroups({{.+}}) -> (index, index, index) {
-// FLW:             %{{.+}}, %{{.+}}, %{{.+}} = %x, %y, %z = iree_tensor_ext.dispatch.workgroup_count_from_slice
-// FLW
+// FLW:         flow.executable private @[[BCAST_DISPATCH:.+]] {
+// FLW:           flow.executable.export public @[[BCAST_DISPATCH_FUNC:.+]] workgroups({{.+}}) -> (index, index, index) {
+// FLW:             %{{.+}}, %{{.+}}, %{{.+}} = iree_tensor_ext.dispatch.workgroup_count_from_slice
 // FLW:           builtin.module {
-// FLW:             func.func @[[BCAST_DISPATCH_FUNC:.+]]({{.+}}) {
+// FLW:             func.func @[[BCAST_DISPATCH_FUNC]]({{.+}}) {
 // FWL:               %{{.+}} = linalg.generic
 // FWL:                 linalg.yield %{{.+}} : i32
 // TODO: keep writing the test.
