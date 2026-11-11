@@ -6,6 +6,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/PassManager.h"
 
+#include "estela/StrelaOptions.h"
 #include "estela/StrelaIR/StrelaDialect.h"
 #include "estela/StrelaTarget.h"
 #include "estela/Transforms/Passes.h"
@@ -13,13 +14,26 @@
 using namespace mlir;
 using namespace mlir::iree_compiler;
 
-namespace {
+using mlir::estela::EstelaOptions;
 
-struct EstelaOptions {
-  void bindOptions(OptionsBinder& binder) {
-    return;
-  }
-};
+void
+EstelaOptions::bindOptions(OptionsBinder &binder) {
+  static llvm::cl::OptionCategory category("STRELA target");
+  binder.opt<unsigned>(
+    "iree-strela-rows", rows, llvm::cl::cat(category),
+    llvm::cl::desc("Number of PE rows in the STRELA fabric.")
+  );
+  binder.opt<unsigned>(
+    "iree-strela-columns", columns, llvm::cl::cat(category),
+    llvm::cl::desc("Number of PE columns (and DMA columns) in the STRELA fabric.")
+  );
+  binder.opt<unsigned>(
+    "iree-strela-max-column-words", maxColumnWords, llvm::cl::cat(category),
+    llvm::cl::desc("Most 32-bit words a DMA column can move in one job.")
+  );
+}
+
+namespace {
 
 struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
 
@@ -115,8 +129,8 @@ tieInputsToInits(RewriterBase &rewriter, linalg::GenericOp op) {
   populateHALTargetBackends(IREE::HAL::TargetBackendList& targets) override {
     targets.add(
       "strela",
-      []() -> std::shared_ptr<IREE::HAL::TargetBackend> {
-        return std::make_shared<estela::StrelaTargetBackend>();
+      [options=this->options]() -> std::shared_ptr<IREE::HAL::TargetBackend> {
+        return std::make_shared<estela::StrelaTargetBackend>(options);
       }
     );
   }
@@ -125,8 +139,8 @@ tieInputsToInits(RewriterBase &rewriter, linalg::GenericOp op) {
   populateHALTargetDevices(IREE::HAL::TargetDeviceList& targets) override {
     targets.add(
       "strela",
-      []() -> std::shared_ptr<IREE::HAL::TargetDevice> {
-        return std::make_shared<estela::StrelaTargetDevice>();
+      [options=this->options]() -> std::shared_ptr<IREE::HAL::TargetDevice> {
+        return std::make_shared<estela::StrelaTargetDevice>(options);
       }
     );
   }

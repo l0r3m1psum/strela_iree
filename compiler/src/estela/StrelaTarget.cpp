@@ -12,6 +12,7 @@
 
 #include "estela/StrelaIR/StrelaDialect.h"
 #include "estela/StrelaIR/StrelaOps.h"
+#include "estela/StrelaIR/StrelaAttrs.h"
 #include "estela/Transforms/Passes.h"
 #include "estela/Utils/Bitstreams.h"
 
@@ -293,9 +294,25 @@ createOutputs(FlatbufferBuilder &builder, ArrayRef<StrelaColumn> columns) {
   return builder.createOffsetVecDestructive(refs);
 }
 
+static IREE::HAL::ExecutableTargetAttr
+getStrelaExecutableTarget(MLIRContext *context, const EstelaOptions &options) {
+  Builder b(context);
+  auto desc = strela::TargetDescAttr::get(
+    context, options.rows, options.columns, options.maxColumnWords
+  );
+  NamedAttribute config(b.getStringAttr("strela.target_desc"), desc);
+  return b.getAttr<IREE::HAL::ExecutableTargetAttr>(
+    b.getStringAttr("strela"), b.getStringAttr("strela_bitstream"),
+    b.getDictionaryAttr(config)
+  );
+}
+
 //===--------------------------------------------------------------------===//
 // StrelaTargetBackend
 //===--------------------------------------------------------------------===//
+
+StrelaTargetBackend::StrelaTargetBackend(const EstelaOptions &options)
+  : options(options) {}
 
 std::string
 StrelaTargetBackend::getLegacyDefaultDeviceID() const {
@@ -332,8 +349,6 @@ StrelaTargetBackend::buildLinkingPassPipeline(OpPassManager &passManager) {
   passManager.addPass(estela::createLinkExecutablesPass());
 }
 
-// TODO: how does this relate to StrelaTargetDevice::getDefaultDeviceTarget?
-// Can some code between the two be reused?
 void
 StrelaTargetBackend::getDefaultExecutableTargets(
   MLIRContext *context,
@@ -341,14 +356,7 @@ StrelaTargetBackend::getDefaultExecutableTargets(
   DictionaryAttr deviceConfigAttr,
   SmallVectorImpl<IREE::HAL::ExecutableTargetAttr> &executableTargetAttrs
 ) const {
-  Builder b(context);
-  SmallVector<NamedAttribute> configItems;
-
-  auto executableTargetAttr = b.getAttr<IREE::HAL::ExecutableTargetAttr>(
-    b.getStringAttr("strela"), b.getStringAttr("strela_bitstream"),
-    b.getDictionaryAttr(configItems)
-  );
-  executableTargetAttrs.push_back(executableTargetAttr);
+  executableTargetAttrs.push_back(getStrelaExecutableTarget(context, options));
 }
 
 LogicalResult
@@ -438,6 +446,9 @@ StrelaTargetBackend::serializeExecutable(
 
 // TODO: move the two comments with the commands to an appropriate test.
 
+StrelaTargetDevice::StrelaTargetDevice(const EstelaOptions &options)
+  : options(options) {}
+
 IREE::HAL::DeviceTargetAttr
 StrelaTargetDevice::getDefaultDeviceTarget(
   MLIRContext *context,
@@ -470,11 +481,7 @@ StrelaTargetDevice::getDefaultDeviceTarget(
   // With
   // iree-compile --iree-plugin=estela  --iree-hal-target-device=strela --compile-to=hal 3rdparty/iree/samples/models/simple_abs.mlir   -o simple_abs_hal.mlir
   // this #hal.executable.target appears in the MLIR source.
-  auto executableTargetAttr = b.getAttr<IREE::HAL::ExecutableTargetAttr>(
-    /*backend=*/ deviceID,
-    /*format=*/ b.getStringAttr("strela_bitstream"),
-    /*configuration=*/ b.getDictionaryAttr({})
-  );
+  auto executableTargetAttr = getStrelaExecutableTarget(context, options);
 
   return IREE::HAL::DeviceTargetAttr::get(
     context,
