@@ -1,5 +1,6 @@
 #include "estela/Transforms/Passes.h"
 #include "estela/Utils/KernelMatchers.h"
+#include "estela/Utils/Finders.h"
 
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
@@ -24,27 +25,6 @@ using namespace mlir;
 using namespace mlir::iree_compiler;
 
 namespace {
-
-// TODO(Diego): check if this function is not already in Utils.
-// Affinity of the !hal.device global whose target is STRELA, so the pass
-// does not depend on what the device is called on the command line.
-// util.global private @device_b = #hal.device.target<"strela", {...}, [#hal.executable.target<"strela", "strela_bitstream">]> : !hal.device
-static IREE::HAL::DeviceAffinityAttr
-findStrelaAffinity(Operation *op) {
-  auto moduleOp = op->getParentOfType<ModuleOp>();
-  for (auto globalOp : moduleOp.getOps<IREE::Util::GlobalOp>()) {
-    auto targetAttr = dyn_cast_if_present<IREE::HAL::DeviceTargetAttr>(
-        globalOp.getInitialValueAttr());
-    if (targetAttr && targetAttr.getDeviceID() == "strela") {
-      SymbolRefAttr device = FlatSymbolRefAttr::get(globalOp.getSymNameAttr());
-      int64_t all_queue_mask = -1;
-      return IREE::HAL::DeviceAffinityAttr::get(
-        op->getContext(), device, all_queue_mask
-      );
-    }
-  }
-  return {};
-}
 
 static bool
 isInt32Immediate(Value value) {
@@ -130,7 +110,7 @@ struct TransferWrapPass final
   : estela::impl::TransferWrapPassBase<TransferWrapPass> {
   void runOnOperation() override {
     IREE::Util::FuncOp funcOp = getOperation();
-    IREE::HAL::DeviceAffinityAttr strela = findStrelaAffinity(funcOp);
+    IREE::HAL::DeviceAffinityAttr strela = estela::findStrelaAffinity(funcOp);
     if (!strela) {
       mlir::emitWarning(funcOp.getLoc()) << "No STRELA device found. It "
         "should be set via the --iree-hal-target-device=strela0=strela option.";

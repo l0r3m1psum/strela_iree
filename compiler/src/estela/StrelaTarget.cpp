@@ -15,6 +15,7 @@
 #include "estela/StrelaIR/StrelaAttrs.h"
 #include "estela/Transforms/Passes.h"
 #include "estela/Utils/Bitstreams.h"
+#include "estela/Utils/Finders.h"
 
 #include "strela_executable_def_builder.h"
 
@@ -300,7 +301,7 @@ getStrelaExecutableTarget(MLIRContext *context, const EstelaOptions &options) {
   auto desc = strela::TargetDescAttr::get(
     context, options.rows, options.columns, options.maxColumnWords
   );
-  NamedAttribute config(b.getStringAttr("strela.target_desc"), desc);
+  NamedAttribute config(b.getStringAttr(strelaTargetDescKey), desc);
   return b.getAttr<IREE::HAL::ExecutableTargetAttr>(
     b.getStringAttr("strela"), b.getStringAttr("strela_bitstream"),
     b.getDictionaryAttr(config)

@@ -3,11 +3,16 @@ iree_cc_library(
     Utils
   HDRS
     "Bitstreams.h"
+    "Finders.h"
     "KernelMatchers.h"
   SRCS
+    "Finders.cpp"
     "KernelMatchers.cpp"
   DEPS
     iree::..::..::compiler::src::estela::defs
+    iree::..::..::compiler::src::estela::StrelaIR::IR
+    iree::compiler::Dialect::HAL::IR
+    iree::compiler::Dialect::Util::IR
     MLIRArithDialect
     MLIRIR
     MLIRLinalgDialect

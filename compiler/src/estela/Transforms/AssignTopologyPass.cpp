@@ -1,4 +1,5 @@
 #include "estela/Transforms/Passes.h"
+#include "estela/Utils/Finders.h"
 
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
@@ -34,11 +35,10 @@ struct AssignTopologyPass final
 
     SmallVector<FlatSymbolRefAttr> strelaDevices, otherDevices;
     for (auto globalOp : moduleOp.getOps<IREE::Util::GlobalOp>()) {
-      auto targetAttr = dyn_cast_if_present<IREE::HAL::DeviceTargetAttr>(
-          globalOp.getInitialValueAttr());
+      IREE::HAL::DeviceTargetAttr targetAttr = estela::findDeviceTarget(globalOp);
       if (!targetAttr) continue;
       auto ref = FlatSymbolRefAttr::get(globalOp.getSymNameAttr());
-      (targetAttr.getDeviceID() == "strela" ? strelaDevices : otherDevices)
+      (estela::isStrelaDevice(targetAttr) ? strelaDevices : otherDevices)
           .push_back(ref);
     }
 
