@@ -51,10 +51,6 @@ struct StrelaColumn {
   StrelaValue wordStride{1, false};
 };
 
-// The size register leaves 16 bits for the byte count and 16 for the byte
-// stride and the driver rejects anything larger.
-static constexpr int64_t strelaMaxColumnWords = 0xFFFF / sizeof(uint32_t);
-
 // Where a binding op reads or writes, for workgroup (0, 0, 0).
 template <typename BindingOp> static StrelaColumn
 getColumn(BindingOp op) {
@@ -89,9 +85,11 @@ offsetColumn(Operation *op, StrelaColumn column, int64_t bytes) {
 
 // The single STRELA operation of an export and the columns it uses.
 struct StrelaExport {
-  std::array<uint32_t, 5 * 4 * 4> bitstream;
-  std::array<StrelaColumn, 4> inputs;
-  std::array<StrelaColumn, 4> outputs;
+  explicit StrelaExport(unsigned words, unsigned columns)
+    : bitstream(words), inputs(columns), outputs(columns) {}
+  SmallVector<uint32_t> bitstream;
+  SmallVector<StrelaColumn> inputs;
+  SmallVector<StrelaColumn> outputs;
 };
 
 // Elementwise kernels run as a single job over whole tensors.
@@ -100,26 +98,27 @@ getElementwiseExport(
   Operation *kernelOp,
   const StrelaKernel &kernel,
   ArrayRef<strela::BindingLoadOp> loadOps,
-  strela::BindingStoreOp storeOp
+  strela::BindingStoreOp storeOp,
+  strela::TargetDescAttr targetDesc
 ) {
   if (loadOps.size() != kernel.inputCount) {
     return kernelOp->emitOpError("operand count does not match its kernel");
   }
-  auto wordCount = [](Operation *op, Type type) -> FailureOr<StrelaValue> {
+  auto wordCount = [targetDesc](Operation *op, Type type) -> FailureOr<StrelaValue> {
     auto tensorType = cast<TensorType>(type);
     if (!tensorType.hasStaticShape()) {
       return op->emitOpError("STRELA needs a static shape, got ") << type;
     }
     int64_t words = tensorType.getNumElements();
-    if (words > strelaMaxColumnWords) {
+    if (words > targetDesc.getMaxColumnWords()) {
       return op->emitOpError("moves ") << words << " words, more than the "
-             << strelaMaxColumnWords << " a STRELA column can in one job";
+             << targetDesc.getMaxColumnWords() << " a STRELA column can in one job";
     }
     return immediate(words);
   };
 
-  StrelaExport result;
-  result.bitstream = *kernel.bitstream;
+  StrelaExport result(strelaBitstreamWords, strelaKernelColumns);
+  result.bitstream.assign(kernel.bitstream->begin(), kernel.bitstream->end());
   for (size_t i = 0; i < loadOps.size(); ++i) {
     strela::BindingLoadOp loadOp = loadOps[i];
     StrelaColumn column = getColumn(loadOp);
@@ -147,7 +146,8 @@ getMatvecExport(
   strela::MatvecOp matvecOp,
   strela::BindingLoadOp lhsOp,
   strela::BindingLoadOp rhsOp,
-  strela::BindingStoreOp resultOp
+  strela::BindingStoreOp resultOp,
+  strela::TargetDescAttr targetDesc
 ) {
   auto rhsType = cast<RankedTensorType>(matvecOp.getRhs().getType());
   if (!rhsType.hasStaticShape()) {
@@ -161,9 +161,9 @@ getMatvecExport(
   }
   // A weight column reads C words F apart, and the input size register holds
   // that whole span, C * F words, as a 16 bit byte count (DESIGN.md H8).
-  if (c * f > strelaMaxColumnWords) {
+  if (c * f > targetDesc.getMaxColumnWords()) {
     return matvecOp.emitOpError("needs C * F of at most ")
-           << strelaMaxColumnWords << " words, the span a strided STRELA "
+           << targetDesc.getMaxColumnWords() << " words, the span a strided STRELA "
            << "column can cover, got " << c << " * " << f;
   }
 
@@ -173,8 +173,9 @@ getMatvecExport(
     immediate(word * (f - strelaMatvecFeaturesPerJob)),
   };
 
-  StrelaExport result;
-  result.bitstream = matvecBitstream(static_cast<uint16_t>(c));
+  StrelaExport result(strelaBitstreamWords, strelaKernelColumns);
+  auto bitstream = matvecBitstream(static_cast<uint16_t>(c));
+  result.bitstream.assign(bitstream.begin(), bitstream.end());
 
   StrelaColumn row = getColumn(lhsOp);
   row.wordCount = immediate(c);
@@ -201,9 +202,16 @@ getMatvecExport(
 }
 
 static FailureOr<StrelaExport>
-getExport(func::FuncOp funcOp) {
+getExport(func::FuncOp funcOp, strela::TargetDescAttr targetDesc) {
+  if (targetDesc.getRows() != strelaKernelRows
+      || targetDesc.getColumns() != strelaKernelColumns) {
+    return funcOp.emitOpError("the hand-written STRELA kernels need a ")
+      << strelaKernelRows << "x" << strelaKernelColumns
+      << " fabric, got " << targetDesc.getRows() << "x" << targetDesc.getColumns()
+      << "; other fabrics need the mapper";
+  }
   SmallVector<Operation *> kernelOps;
-  funcOp.walk([&](Operation *op) {
+  funcOp.walk([&kernelOps](Operation *op) {
     if (isa<strela::AddOp, strela::ReluOp, strela::MatvecOp>(op)) {
       kernelOps.push_back(op);
     }
@@ -233,11 +241,11 @@ getExport(func::FuncOp funcOp) {
   }
 
   if (auto matvecOp = dyn_cast<strela::MatvecOp>(kernelOp)) {
-    return getMatvecExport(matvecOp, loadOps[0], loadOps[1], storeOp);
+    return getMatvecExport(matvecOp, loadOps[0], loadOps[1], storeOp, targetDesc);
   }
   const StrelaKernel &kernel =
     isa<strela::AddOp>(kernelOp) ? add_kernel : relu_kernel;
-  return getElementwiseExport(kernelOp, kernel, loadOps, storeOp);
+  return getElementwiseExport(kernelOp, kernel, loadOps, storeOp, targetDesc);
 }
 
 static iree_hal_strela_ValueDef_t
@@ -371,6 +379,11 @@ StrelaTargetBackend::serializeExecutable(
     return variantOp.emitOpError("has no inner module to serialize");
   }
 
+  strela::TargetDescAttr targetDesc = findStrelaTargetDesc(variantOp);
+  if (!targetDesc) {
+    return variantOp.emitOpError("has no target description");
+  }
+
   FlatbufferBuilder builder;
   iree_hal_strela_ExecutableDef_start_as_root(builder);
 
@@ -386,7 +399,7 @@ StrelaTargetBackend::serializeExecutable(
     if (!funcOp) {
       return exportOp.emitOpError("has no function in the inner module");
     }
-    FailureOr<StrelaExport> strelaExport = getExport(funcOp);
+    FailureOr<StrelaExport> strelaExport = getExport(funcOp, targetDesc);
     if (failed(strelaExport)) return failure();
 
     auto layoutAttr = exportOp.getLayoutAttr();

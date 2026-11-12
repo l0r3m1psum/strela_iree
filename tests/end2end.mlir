@@ -163,7 +163,7 @@ func.func @add(%lhs: tensor<?xi32>, %rhs: tensor<?xi32>) -> (tensor<?xi32>) {
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable private @{{.+}} {
 // EXC:         hal.executable private @{{.+}} {
-// EXC:           hal.executable.variant public @{{.+}} target(<"strela", "strela_bitstream">) {
+// EXC:           hal.executable.variant public @{{.+}} target(<"strela", "strela_bitstream", {{{.+}}}>) {
 // EXC:             builtin.module {
 // EXC:               func.func @{{.+}}() {
 // EXC:                 %[[LHS:.+]] = strela.binding_load binding(0) : tensor<?xi32>

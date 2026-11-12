@@ -14,6 +14,12 @@
 
 namespace mlir::estela {
 
+inline constexpr size_t strelaKernelRows = 4;
+inline constexpr size_t strelaKernelColumns = 4;
+inline constexpr size_t strelaConfigWordsPerPe = 5;
+inline constexpr size_t strelaBitstreamWords =
+    strelaKernelRows * strelaKernelColumns * strelaConfigWordsPerPe;
+
 /*
  * +--+--+--+--+
  * | 0| 1| 2| 3|
@@ -31,7 +37,7 @@ namespace mlir::estela {
 // three STRELA columns to output their scalar products y_{i+0} y_{i+1} y_{i+2}.
 // PEs 5 and 6 fork x east to the next multiplier; PE 7 must not, since east of
 // the last column is tied not ready (cgra.sv) and the fork would never fire.
-inline constexpr std::array<uint32_t, 5 * 4 * 4> centered_matmul_bitstream{
+inline constexpr std::array<uint32_t, strelaBitstreamWords> centered_matmul_bitstream{
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
   0x00000041, 0x02000000, 0x00000000, 0x00000000, 0x00000000, // 4
@@ -55,7 +61,7 @@ inline constexpr std::array<uint32_t, 5 * 4 * 4> centered_matmul_bitstream{
 
 // Copies every input column to the output column with the same index. The same
 // words as bypass_kernel_bitstream in strela_pynq/include/strela.h.
-inline constexpr std::array<uint32_t, 5 * 4 * 4> bypass_bitstream{
+inline constexpr std::array<uint32_t, strelaBitstreamWords> bypass_bitstream{
   0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
   0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
   0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 4
@@ -79,7 +85,7 @@ inline constexpr std::array<uint32_t, 5 * 4 * 4> bypass_bitstream{
 
 // The addition of column 0 and 1 input is written in out of column 1
 // The addition of column 2 and 3 input is written in out of column 3
-inline constexpr std::array<uint32_t, 5 * 4 * 4> add_bitstream{
+inline constexpr std::array<uint32_t, strelaBitstreamWords> add_bitstream{
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
   0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 4
@@ -105,7 +111,7 @@ inline constexpr std::array<uint32_t, 5 * 4 * 4> add_bitstream{
 // bring x round to PE 4, whose mux picks x or the constant 0 on that flag; the
 // result flows down column 0. The same words as relu_kernel_bitstream in
 // strela_pynq/include/strela.h, measured correct on the board.
-inline constexpr std::array<uint32_t, 5 * 4 * 4> relu_bitstream{
+inline constexpr std::array<uint32_t, strelaBitstreamWords> relu_bitstream{
   0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 12
   0x00000021, 0x00000000, 0x00000000, 0x00000000, 0x00000000, // 8
   0x00004083, 0x20CC0300, 0x000000A0, 0x00000000, 0x00000000, // 4
@@ -130,7 +136,7 @@ inline constexpr std::array<uint32_t, 5 * 4 * 4> relu_bitstream{
 // A STRELA operation as the CGRA runs it: its configuration and which column
 // each operand enters and the result leaves by.
 struct StrelaKernel {
-  const std::array<uint32_t, 5 * 4 * 4> *bitstream;
+  const std::array<uint32_t, strelaBitstreamWords> *bitstream;
   unsigned inputCount;
   // Indexed by operand.
   std::array<unsigned, 4> inputColumns;
@@ -144,7 +150,7 @@ inline constexpr StrelaKernel relu_kernel{&relu_bitstream, 1, {0}, 0};
 // Output features one matvec job computes, on output columns 1-3.
 inline constexpr int64_t strelaMatvecFeaturesPerJob = 3;
 
-inline constexpr std::array<uint32_t, 5 * 4 * 4> matvecBitstream(uint16_t inChan) {
+inline constexpr std::array<uint32_t, strelaBitstreamWords> matvecBitstream(uint16_t inChan) {
   auto k = centered_matmul_bitstream;
   k[19] = k[39] = k[59] = k[79] = 0;                         // PE 0-3 constants (zero points)
   k[27] = k[47] = k[67] = (uint32_t(inChan) << 16) | 0x0080; // PE 9-11 accumulation length
