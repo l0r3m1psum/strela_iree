@@ -49,9 +49,10 @@ classify(linalg::LinalgOp op) {
       bool unitBatch = true;
       for (unsigned d : dims->batch) unitBatch &= sizes[d] == 1;
       bool oneEach = dims->m.size() == 1 && dims->n.size() == 1 && dims->k.size() == 1;
-      bool staticCF = !ShapedType::isDynamic(sizes[dims->n[0]])
-                   && !ShapedType::isDynamic(sizes[dims->k[0]]);
-      bool supported = !unitBatch || !oneEach || !staticCF || !hasZeroFillInit(op);
+      bool staticCF = oneEach
+        && !ShapedType::isDynamic(sizes[dims->n[0]])
+        && !ShapedType::isDynamic(sizes[dims->k[0]]);
+      bool supported = unitBatch || staticCF || hasZeroFillInit(op);
       res = supported ? StrelaOpKind::Contraction : StrelaOpKind::Unsupported;
     }
   }
@@ -108,7 +109,7 @@ summarize(linalg::LinalgOp op) {
     }
 
   }
-  return {};
+  return res;
 }
 
 } // namespace mlir::estela
