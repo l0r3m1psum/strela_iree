@@ -159,7 +159,7 @@ static FailureOr<Operation *>
 findKernelOp(func::FuncOp funcOp) {
   Operation *kernelOp = nullptr;
   for (Operation &op : funcOp.getOps()) {
-    if (isa<strela::AddOp, strela::ReluOp, strela::MatvecOp>(&op)) {
+    if (isa<strela::MatvecOp>(&op)) {
       if (kernelOp) {
         return op.emitOpError()
                << "second STRELA op in one dispatch; the backend can only "

@@ -16,7 +16,6 @@ iree_cc_library(
   SRCS
     "AssignTopologyPass.cpp"
     "ConvertLinalgToStrelaPass.cpp"
-    "FuseConv2DPass.cpp"
     "LinkExecutablesPass.cpp"
     "MaterializeBindingsPass.cpp"
     "NormalizeRescalePass.cpp"

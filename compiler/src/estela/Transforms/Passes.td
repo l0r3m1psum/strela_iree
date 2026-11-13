@@ -17,10 +17,6 @@ def NormalizeRescalePass
   }];
 }
 
-def FuseConv2DPass : Pass<"iree-strela-fuse-conv2d", "mlir::func::FuncOp"> {
-  let summary = "Fuses centering subtractions into a GEMM ukernel";
-}
-
 def AssignTopologyPass : Pass<"iree-strela-assign-topology", "mlir::ModuleOp"> {
   let summary = "Assigns the topology of the STRELA device";
 }
@@ -40,8 +36,7 @@ def ConvertLinalgToStrelaPass
     : Pass<"iree-strela-convert-linalg", "mlir::func::FuncOp"> {
   let summary = "Converts linalg ops to strela backend ops";
   let description = [{
-    Replaces the linalg ops STRELA can run with strela.add, strela.relu and
-    strela.matvec.
+    Replaces the linalg ops STRELA can run with strela.matvec.
   }];
   let dependentDialects = ["mlir::strela::StrelaDialect"];
 }

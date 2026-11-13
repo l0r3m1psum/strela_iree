@@ -48,7 +48,9 @@ buildCount(
 
   strela::MatvecOp matvecOp;
   funcOp.walk([&](strela::MatvecOp op) { matvecOp = op; });
-  if (!matvecOp) return SmallVector<Value, 3>{one, one, one};
+  if (!matvecOp) {
+    return matvecOp.emitOpError("no strela.matvec found");
+  }
 
   auto rhsType = cast<RankedTensorType>(matvecOp.getRhs().getType());
   int64_t features = rhsType.getDimSize(2);

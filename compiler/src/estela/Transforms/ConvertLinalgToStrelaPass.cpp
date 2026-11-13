@@ -30,6 +30,7 @@ print(mlir::ModuleOp moduleOp) {
   llvm::errs() << '\n';
 }
 
+// TODO: move this in utils...
 static void
 print(mlir::func::FuncOp funcOp) {
   print(funcOp->getParentOfType<mlir::ModuleOp>());
@@ -41,56 +42,9 @@ namespace mlir::estela {
 } // namespace mlir::estela
 
 using namespace mlir;
-using mlir::estela::isStrelaLinalgAdd;
-using mlir::estela::isStrelaLinalgRelu;
 using mlir::estela::isStrelaLinalgMatvec;
 
 namespace {
-
-struct ConvertLinalgAddToStrela
-  : public OpRewritePattern<linalg::GenericOp> {
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
-
-  LogicalResult
-  matchAndRewrite(
-    linalg::GenericOp genericOp, PatternRewriter &rewriter
-  ) const override {
-    LogicalResult result = isStrelaLinalgAdd(genericOp);
-
-    if (succeeded(result)) {
-      rewriter.replaceOpWithNewOp<strela::AddOp>(
-        genericOp,
-        genericOp.getResultTypes(),
-        genericOp.getDpsInputs()[0],
-        genericOp.getDpsInputs()[1]
-      );
-    }
-
-    return result;
-  }
-};
-
-struct ConvertLinalgReluToStrela
-  : public OpRewritePattern<linalg::GenericOp> {
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
-
-  LogicalResult
-  matchAndRewrite(
-    linalg::GenericOp genericOp, PatternRewriter &rewriter
-  ) const override {
-    LogicalResult result = isStrelaLinalgRelu(genericOp);
-
-    if (succeeded(result)) {
-      rewriter.replaceOpWithNewOp<strela::ReluOp>(
-        genericOp,
-        genericOp.getResultTypes(),
-        genericOp.getDpsInputs()[0]
-      );
-    }
-
-    return result;
-  }
-};
 
 struct ConvertLinalgMatvecToStrela
   : public OpRewritePattern<linalg::BatchMatmulOp> {
@@ -125,8 +79,6 @@ struct ConvertLinalgToStrelaPass final
 
     RewritePatternSet patterns(context);
     patterns.add<
-      ConvertLinalgAddToStrela,
-      ConvertLinalgReluToStrela,
       ConvertLinalgMatvecToStrela
     >(context);
 

@@ -7,24 +7,6 @@ include "StrelaAttrs.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"  // SameOperandsAndResultType
 include "mlir/Interfaces/SideEffectInterfaces.td"  // Pure
 
-def AddOp : Strela_Op<"add", [Pure, SameOperandsAndResultType]> {
-  let summary = "element-wise addition operation";
-  let arguments = (ins I32Tensor:$lhs, I32Tensor:$rhs);
-  let results = (outs I32Tensor:$result);
-  let assemblyFormat = [{
-    $lhs `,` $rhs attr-dict `:` type($lhs)
-  }];
-}
-
-def ReluOp : Strela_Op<"relu", [Pure, SameOperandsAndResultType]> {
-  let summary = "Rectified Linear Unit (ReLU) operation";
-  let arguments = (ins I32Tensor:$input);
-  let results = (outs I32Tensor:$result);
-  let assemblyFormat = [{
-    $input attr-dict `:` type($input)
-  }];
-}
-
 def MatvecOp : Strela_Op<"matvec", [Pure]> {
   let summary = "Batched matrix multiplication with a zero accumulator";
   let description = [{

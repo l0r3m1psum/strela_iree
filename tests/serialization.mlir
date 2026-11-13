@@ -10,13 +10,18 @@
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --iree-hal-dump-executable-binaries-to=%t %s -o %t/add.vmfb
-// RUN: estela-dump-executable --header %t/module_add_dispatch_0_strela_bitstream.str1 \
+// RUN:   --iree-hal-dump-executable-binaries-to=%t %s -o %t/matvec.vmfb
+// RUN: estela-dump-executable --header %t/module_matvec_dispatch_0_strela_bitstream.str1 \
 // RUN:   | FileCheck %s
 
-func.func @add(%a: tensor<16xi32>, %b: tensor<16xi32>) -> tensor<16xi32> {
-  %0 = tosa.add %a, %b : (tensor<16xi32>, tensor<16xi32>) -> tensor<16xi32>
-  return %0 : tensor<16xi32>
+// The smallest matvec: N = 2 rows of C = 16 words times a C x F = 16 x 3
+// matrix, every shape static. Not valid TOSA (no i32 matmul), but it is what
+// reaches STRELA. serialization_matvec.mlir follows the numbers of a bigger,
+// dynamic one.
+func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x3xi32> {
+  %zp = "tosa.const"() {values = dense<0> : tensor<1xi32>} : () -> tensor<1xi32>
+  %0 = tosa.matmul %x, %w, %zp, %zp : (tensor<1x2x16xi32>, tensor<1x16x3xi32>, tensor<1xi32>, tensor<1xi32>) -> tensor<1x2x3xi32>
+  return %0 : tensor<1x2x3xi32>
 }
 
 // The IREE header (iree_flatbuffer_file_header_t), 64 bytes: magic "STR1" (the
@@ -33,7 +38,7 @@ func.func @add(%a: tensor<16xi32>, %b: tensor<16xi32>) -> tensor<16xi32> {
 // One ExportDef per dispatch STRELA runs, named as hal.executable.export.
 // CHECK-NEXT: "executable": {
 // CHECK-NEXT:   "exports": [{
-// CHECK-NEXT:       "name": "add_dispatch_0_elementwise_16_i32",
+// CHECK-NEXT:       "name": "matvec_dispatch_0_batch_matmul_1x2x3x16_i32",
 
 // The CGRA configuration, STRELA_KERNEL_SIZE (80) words; not checked here.
 // CHECK-NEXT:       "bitstream": [
@@ -42,9 +47,13 @@ func.func @add(%a: tensor<16xi32>, %b: tensor<16xi32>) -> tensor<16xi32> {
 // an immediate, or with is_constant the ordinal of the push constant holding
 // it. Addresses are in bytes, counts and strides in words.
 //
-// The first column is spelled out in full. %a starts at byte 0 of binding 0.
-// The add runs as a single workgroup, so every workgroup term is step 0 with
-// no clamp (limit 2^32 - 1).
+// The grid is (ceildiv(F, 3), N, 1) = (1, 2, 1): one job per row, each
+// computing all three features. A column's address is offset plus, for each
+// workgroup id, min(id * step, limit).
+//
+// The first column, row y of %x, is spelled out in full. It starts at byte 0
+// of binding 0 and moves one row of C words, 64 bytes, per y; x and z do not
+// move it (step 0, no clamp: limit 2^32 - 1).
 // CHECK:            "inputs": [{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
@@ -63,7 +72,16 @@ func.func @add(%a: tensor<16xi32>, %b: tensor<16xi32>) -> tensor<16xi32> {
 // CHECK-NEXT:               }
 // CHECK-NEXT:             },
 // CHECK-NEXT:             "workgroup_y": {
-// CHECK:                  "workgroup_z": {
+// CHECK-NEXT:               "step": {
+// CHECK-NEXT:                 "value": 64,
+// CHECK-NEXT:                 "is_constant": false
+// CHECK-NEXT:               },
+// CHECK-NEXT:               "limit": {
+// CHECK-NEXT:                 "value": 4294967295,
+// CHECK-NEXT:                 "is_constant": false
+// CHECK-NEXT:               }
+// CHECK-NEXT:             },
+// CHECK-NEXT:             "workgroup_z": {
 // CHECK:                "word_count": {
 // CHECK-NEXT:             "value": 16,
 // CHECK-NEXT:             "is_constant": false
@@ -73,43 +91,59 @@ func.func @add(%a: tensor<16xi32>, %b: tensor<16xi32>) -> tensor<16xi32> {
 // CHECK-NEXT:             "is_constant": false
 // CHECK-NEXT:           }
 
-// FuseDispatchBindings put both operands in binding 0: %b starts 64 bytes after
-// %a (16 words rounded up to the 64 byte min_buffer_offset_alignment), a
-// constant offset so no push constants are involved. The add kernel reads
-// columns 0 and 1.
+// Columns 1-3 read the three columns of %w: C words, one every F = 3.
+// FuseDispatchBindings put both operands in binding 0, %w right after the 128
+// bytes of %x, a constant offset so no push constants are involved. With
+// F = 3 there is a single x, so the x clamp is 4(F - 3) = 0.
 // CHECK-NEXT:         },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
 // CHECK-NEXT:             "offset": {
-// CHECK-NEXT:               "value": 64,
+// CHECK-NEXT:               "value": 128,
 // CHECK:                "word_count": {
 // CHECK-NEXT:             "value": 16,
-
-// A word count of 0 leaves a column unused; its other fields are still present.
+// CHECK-NEXT:             "is_constant": false
+// CHECK-NEXT:           },
+// CHECK-NEXT:           "word_stride": {
+// CHECK-NEXT:             "value": 3,
 // CHECK:              },{
-// CHECK:                "word_count": {
-// CHECK-NEXT:             "value": 0,
+// CHECK-NEXT:           "address": {
+// CHECK-NEXT:             "binding": 0,
+// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:               "value": 132,
 // CHECK:              },{
-// CHECK:                "word_count": {
-// CHECK-NEXT:             "value": 0,
+// CHECK-NEXT:           "address": {
+// CHECK-NEXT:             "binding": 0,
+// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:               "value": 136,
 
-// The sum leaves by column 1 into binding 1. Outputs have no word_stride.
+// A word count of 0 leaves a column unused; its other fields are still
+// present. The matvec does not use output column 0. Outputs have no
+// word_stride.
 // CHECK:            "outputs": [{
 // CHECK:                "word_count": {
 // CHECK-NEXT:             "value": 0,
 // CHECK-NEXT:             "is_constant": false
 // CHECK-NEXT:           }
+
+// Output columns 1-3 each write one word of row y into binding 1, a row of
+// 4F = 12 bytes further per y.
 // CHECK-NEXT:         },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 1,
+// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:               "value": 0,
+// CHECK:                  "workgroup_y": {
+// CHECK-NEXT:               "step": {
+// CHECK-NEXT:                 "value": 12,
 // CHECK:                "word_count": {
-// CHECK-NEXT:             "value": 16,
+// CHECK-NEXT:             "value": 1,
 // CHECK-NEXT:             "is_constant": false
 // CHECK-NEXT:           }
 // CHECK-NEXT:         },{
 
-// The pipeline layout: no push constants (every offset is static) and two
-// bindings, the packed inputs and the result.
+// The pipeline layout: no push constants (every offset and size is static) and
+// two bindings, the packed inputs and the result.
 // CHECK:            "constant_count": 0,
 // CHECK-NEXT:       "binding_count": 2
 // CHECK-NEXT:     }

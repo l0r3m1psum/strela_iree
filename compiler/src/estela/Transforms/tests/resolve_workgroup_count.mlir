@@ -4,40 +4,40 @@
 
 // iree-strela-resolve-workgroup-count replaces the
 // workgroup_count_from_slice placeholder dispatch creation leaves in every
-// export with the grid STRELA runs the kernel on: one job for an elementwise
-// kernel, one job per activation row and triple of output features for a
-// matvec. It runs before MaterializeBindings, so the dispatch body still has
-// the loads that say which workload value is N.
+// export with the grid STRELA runs the matvec on: one job per activation row
+// and triple of output features. It runs before MaterializeBindings, so the
+// dispatch body still has the loads that say which workload value is N.
 
-#layout = #hal.pipeline.layout<constants = 2, bindings = [
+#layout = #hal.pipeline.layout<bindings = [
   #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
   #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
   #hal.pipeline.binding<storage_buffer, Indirect>
 ], flags = Indirect>
 
-// An elementwise kernel always runs as a single job.
+// One row and F = 3 features fill exactly one job.
 
-// CHECK-LABEL: hal.executable private @add
-// CHECK:         hal.executable.export public @add ordinal(0) {{.+}} count(%{{.+}}: !hal.device)
-// CHECK-DAG:       %[[C1:.+]] = arith.constant 1 : index
-// CHECK-NOT:       workgroup_count_from_slice
-// CHECK:           hal.return %[[C1]], %[[C1]], %[[C1]] : index, index, index
-hal.executable private @add {
+// CHECK-LABEL: hal.executable private @matvec_single_job
+// CHECK:         hal.executable.export public @matvec_single_job ordinal(0) {{.+}} count(%{{.+}}: !hal.device)
+// CHECK-NEXT:      arith.constant 1 : index
+// CHECK-NEXT:      arith.constant 1 : index
+// CHECK-NEXT:      arith.constant 1 : index
+// CHECK-NEXT:      hal.return
+hal.executable private @matvec_single_job {
   hal.executable.variant public @strela_bitstream target(<"strela", "strela_bitstream">) {
-    hal.executable.export public @add ordinal(0) layout(#layout) count(%device: !hal.device) -> (index, index, index) {
+    hal.executable.export public @matvec_single_job ordinal(0) layout(#layout) count(%device: !hal.device) -> (index, index, index) {
       %x, %y, %z = iree_tensor_ext.dispatch.workgroup_count_from_slice()
       hal.return %x, %y, %z : index, index, index
     }
     builtin.module {
-      func.func @add() {
+      func.func @matvec_single_job() {
         %c0 = arith.constant 0 : index
-        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16xi32>>
-        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16xi32>>
-        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<16xi32>>
-        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0], sizes = [16], strides = [1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16xi32>> -> tensor<16xi32>
-        %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [0], sizes = [16], strides = [1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16xi32>> -> tensor<16xi32>
-        %5 = strela.add %3, %4 : tensor<16xi32>
-        iree_tensor_ext.dispatch.tensor.store %5, %2, offsets = [0], sizes = [16], strides = [1] : tensor<16xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<16xi32>>
+        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x1x16xi32>>
+        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16x3xi32>>
+        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x1x3xi32>>
+        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0, 0, 0], sizes = [1, 1, 16], strides = [1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x1x16xi32>> -> tensor<1x1x16xi32>
+        %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [0, 0, 0], sizes = [1, 16, 3], strides = [1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16x3xi32>> -> tensor<1x16x3xi32>
+        %5 = strela.matvec %3, %4 : tensor<1x1x16xi32>, tensor<1x16x3xi32> -> tensor<1x1x3xi32>
+        iree_tensor_ext.dispatch.tensor.store %5, %2, offsets = [0, 0, 0], sizes = [1, 1, 3], strides = [1, 1, 1] : tensor<1x1x3xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x1x3xi32>>
         return
       }
     }

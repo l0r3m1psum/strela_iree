@@ -92,49 +92,6 @@ struct StrelaExport {
   SmallVector<StrelaColumn> outputs;
 };
 
-// Elementwise kernels run as a single job over whole tensors.
-static FailureOr<StrelaExport>
-getElementwiseExport(
-  Operation *kernelOp,
-  const StrelaKernel &kernel,
-  ArrayRef<strela::BindingLoadOp> loadOps,
-  strela::BindingStoreOp storeOp,
-  strela::TargetDescAttr targetDesc
-) {
-  if (loadOps.size() != kernel.inputCount) {
-    return kernelOp->emitOpError("operand count does not match its kernel");
-  }
-  auto wordCount = [targetDesc](Operation *op, Type type) -> FailureOr<StrelaValue> {
-    auto tensorType = cast<TensorType>(type);
-    if (!tensorType.hasStaticShape()) {
-      return op->emitOpError("STRELA needs a static shape, got ") << type;
-    }
-    int64_t words = tensorType.getNumElements();
-    if (words > targetDesc.getMaxColumnWords()) {
-      return op->emitOpError("moves ") << words << " words, more than the "
-             << targetDesc.getMaxColumnWords() << " a STRELA column can in one job";
-    }
-    return immediate(words);
-  };
-
-  StrelaExport result(strelaBitstreamWords, strelaKernelColumns);
-  result.bitstream.assign(kernel.bitstream->begin(), kernel.bitstream->end());
-  for (size_t i = 0; i < loadOps.size(); ++i) {
-    strela::BindingLoadOp loadOp = loadOps[i];
-    StrelaColumn column = getColumn(loadOp);
-    FailureOr<StrelaValue> words = wordCount(loadOp, loadOp.getType());
-    if (failed(words)) return failure();
-    column.wordCount = *words;
-    result.inputs[kernel.inputColumns[i]] = column;
-  }
-  StrelaColumn column = getColumn(storeOp);
-  FailureOr<StrelaValue> words = wordCount(storeOp, storeOp.getValue().getType());
-  if (failed(words)) return failure();
-  column.wordCount = *words;
-  result.outputs[kernel.outputColumn] = column;
-  return result;
-}
-
 // result[0, n, f] = sum_c lhs[0, n, c] * rhs[0, c, f], one job per workgroup
 // (x, y) of the (ceildiv(F, 3), N, 1) grid. The job computes the features
 // f0 .. f0 + 2, f0 = min(3x, F - 3), of row n = y: the row enters column 0, the
@@ -212,7 +169,7 @@ getExport(func::FuncOp funcOp, strela::TargetDescAttr targetDesc) {
   }
   SmallVector<Operation *> kernelOps;
   funcOp.walk([&kernelOps](Operation *op) {
-    if (isa<strela::AddOp, strela::ReluOp, strela::MatvecOp>(op)) {
+    if (isa<strela::MatvecOp>(op)) {
       kernelOps.push_back(op);
     }
   });
@@ -240,12 +197,8 @@ getExport(func::FuncOp funcOp, strela::TargetDescAttr targetDesc) {
     return kernelOp->emitOpError("result is not stored straight to a binding");
   }
 
-  if (auto matvecOp = dyn_cast<strela::MatvecOp>(kernelOp)) {
-    return getMatvecExport(matvecOp, loadOps[0], loadOps[1], storeOp, targetDesc);
-  }
-  const StrelaKernel &kernel =
-    isa<strela::AddOp>(kernelOp) ? add_kernel : relu_kernel;
-  return getElementwiseExport(kernelOp, kernel, loadOps, storeOp, targetDesc);
+  auto matvecOp = cast<strela::MatvecOp>(kernelOp);
+  return getMatvecExport(matvecOp, loadOps[0], loadOps[1], storeOp, targetDesc);
 }
 
 static iree_hal_strela_ValueDef_t

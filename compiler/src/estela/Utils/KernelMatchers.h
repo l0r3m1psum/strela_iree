@@ -9,13 +9,6 @@
 
 namespace mlir::estela {
 
-// A linalg.generic that is exactly an i32 elementwise add STRELA can run.
-LogicalResult isStrelaLinalgAdd(linalg::GenericOp genericOp);
-
-// A linalg.generic that is exactly an i32 relu. Matches both the two-operand
-// form tosa.maximum lowers to and the one-operand form canonicalization leaves.
-LogicalResult isStrelaLinalgRelu(linalg::GenericOp genericOp);
-
 // A single-batch i32 linalg.batch_matmul with static C and F, accumulating into
 // a zero fill.
 LogicalResult isStrelaLinalgMatvec(linalg::BatchMatmulOp op);
