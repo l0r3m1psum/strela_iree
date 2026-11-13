@@ -30,6 +30,8 @@ findDeviceTarget(iree_compiler::IREE::Util::GlobalOp globalOp);
 // Whether `targetAttr` is a STRELA device.
 bool isStrelaDevice(iree_compiler::IREE::HAL::DeviceTargetAttr targetAttr);
 
+bool isInt32Immediate(Value value);
+
 // The util.global the HAL device assignment pipeline created for the STRELA
 // device, i.e. --iree-hal-target-device=NAME=strela, so the passes do not
 // depend on the name given on the command line.

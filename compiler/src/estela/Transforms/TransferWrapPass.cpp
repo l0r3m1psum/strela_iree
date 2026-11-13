@@ -26,13 +26,6 @@ using namespace mlir::iree_compiler;
 
 namespace {
 
-static bool
-isInt32Immediate(Value value) {
-  DenseIntElementsAttr attr;
-  return matchPattern(value, m_Constant(&attr)) && attr.isSplat() &&
-         attr.getElementType().isInteger(32);
-}
-
 static void
 wrapInTransfers(
   RewriterBase &rewriter, linalg::LinalgOp op, Attribute strela, Attribute host
@@ -62,7 +55,7 @@ wrapInTransfers(
     // A splat is folded into the op, during dispatch formation
     // (--compile-to=dispatch-creation), and becomes a STRELA immediate, which a
     // transfer would prevent. Other constants have to arrive through a binding.
-    if (isInt32Immediate(value)) continue;
+    if (mlir::estela::isInt32Immediate(value)) continue;
 
     SmallVector<Value> dims =
       IREE::Util::buildDynamicDimsForValue(loc, value, rewriter);

@@ -8,16 +8,23 @@ using namespace mlir::iree_compiler;
 
 namespace mlir::estela {
 
+bool
+isStrelaDevice(IREE::HAL::DeviceTargetAttr targetAttr) {
+  return targetAttr && targetAttr.getDeviceID() == "strela";
+}
+
+bool
+isInt32Immediate(Value value) {
+  DenseIntElementsAttr attr;
+  return matchPattern(value, m_Constant(&attr)) && attr.isSplat() &&
+         attr.getElementType().isInteger(32);
+}
+
 IREE::HAL::DeviceTargetAttr
 findDeviceTarget(IREE::Util::GlobalOp globalOp) {
   return dyn_cast_if_present<IREE::HAL::DeviceTargetAttr>(
     globalOp.getInitialValueAttr()
   );
-}
-
-bool
-isStrelaDevice(IREE::HAL::DeviceTargetAttr targetAttr) {
-  return targetAttr && targetAttr.getDeviceID() == "strela";
 }
 
 IREE::Util::GlobalOp
