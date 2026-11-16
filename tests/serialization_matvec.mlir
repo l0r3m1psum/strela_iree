@@ -12,27 +12,28 @@
 // RUN: estela-dump-executable %t/module_matvec_dispatch_0_strela_bitstream.str1 \
 // RUN:   | FileCheck %s
 
-// The backend obeys #strela.target_desc: a word limit below C * F = 128 rejects
-// this matvec, and so does a fabric the hand-written kernels were not written
-// for. Only the numbers that come from the flags are checked, so rewording the
-// messages does not break the test.
-// RUN: not iree-compile --iree-plugin=estela \
+// The frontend obeys #strela.target_desc: with a word limit below C * F = 128,
+// or a fabric the hand-written kernel was not written for, the matvec is not
+// offloaded and runs on the CPU instead. The backend never sees it, so it has
+// nothing to reject.
+// RUN: iree-compile --iree-plugin=estela \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --iree-strela-max-column-words=100 %s -o /dev/null 2>&1 \
-// RUN:   | FileCheck %s --check-prefix=WORDS
-// WORDS: error:{{.*}} 100
-
-// RUN: not iree-compile --iree-plugin=estela \
+// RUN:   --iree-strela-max-column-words=100 --compile-to=executable-targets %s \
+// RUN:   | FileCheck %s --check-prefix=CPU
+// RUN: iree-compile --iree-plugin=estela \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --iree-strela-columns=16 %s -o /dev/null 2>&1 \
-// RUN:   | FileCheck %s --check-prefix=FABRIC
-// FABRIC: error:{{.*}}4x16
+// RUN:   --iree-strela-columns=16 --compile-to=executable-targets %s \
+// RUN:   | FileCheck %s --check-prefix=CPU
+// CPU-NOT: strela.matvec
+// CPU:     hal.executable.variant public @vmvx_bytecode_fb
+// CPU:       hal.executable.export public @matvec_dispatch_0_batch_matmul_
+// CPU-NOT: strela.matvec
 
 // N rows of C = 16 words times a C x F = 16 x 8 matrix. Not valid TOSA (no i32
 // matmul), but it is what reaches STRELA.

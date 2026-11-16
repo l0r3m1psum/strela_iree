@@ -4,12 +4,10 @@ iree_cc_library(
   HDRS
     "Bitstreams.h"
     "Finders.h"
-    "KernelMatchers.h"
-    "StrelaModel.h"
+    "StrelaContraction.h"
   SRCS
     "Finders.cpp"
-    "KernelMatchers.cpp"
-    "StrelaModel.cpp"
+    "StrelaContraction.cpp"
   DEPS
     iree::..::..::compiler::src::estela::defs
     iree::..::..::compiler::src::estela::StrelaIR::IR

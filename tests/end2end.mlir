@@ -342,9 +342,9 @@ func.func @matvec_const_weights(%x: tensor<1x1x16xi32>) -> tensor<1x1x3xi32> {
 // support int32). TOSA matmul is also necessarily a batched matrix
 // multiplication hence the reshape.
 
-func.func @matmul_bias(%act: tensor<?x128xi32>, %wgt: tensor<128x128xi32>) -> (tensor<?x128xi32>) {
-  %act_shape = tosa.const_shape values(dense<[1, -1, 128]> : tensor<3xindex>) : () -> !tosa.shape<3>
-  %wgt_shape = tosa.const_shape values(dense<[1, 128, 128]> : tensor<3xindex>) : () -> !tosa.shape<3>
+func.func @matmul_bias(%act: tensor<?x64xi32>, %wgt: tensor<128x64xi32>) -> (tensor<?x128xi32>) {
+  %act_shape = tosa.const_shape values(dense<[1, -1, 64]> : tensor<3xindex>) : () -> !tosa.shape<3>
+  %wgt_shape = tosa.const_shape values(dense<[1, 128, 64]> : tensor<3xindex>) : () -> !tosa.shape<3>
   %out_shape = tosa.const_shape values(dense<[-1, 128]> : tensor<2xindex>) : () -> !tosa.shape<2>
 
   %zp = "tosa.const"() {values = dense<0> : tensor<1xi32>} : () -> tensor<1xi32>
@@ -359,11 +359,11 @@ func.func @matmul_bias(%act: tensor<?x128xi32>, %wgt: tensor<128x128xi32>) -> (t
     0x0,0x1,0x2,0x3,0x4,0x5,0x6,0x7,0x8,0x9,0xA,0xB,0xC,0xD,0xE,0xF
   ]]]> : tensor<1x1x128xi32>} : () -> tensor<1x1x128xi32>
 
-  %act3 = tosa.reshape %act, %act_shape : (tensor<?x128xi32>, !tosa.shape<3>) -> tensor<1x?x128xi32>
-  %wgt3 = tosa.reshape %wgt, %wgt_shape : (tensor<128x128xi32>, !tosa.shape<3>) -> tensor<1x128x128xi32>
+  %act3 = tosa.reshape %act, %act_shape : (tensor<?x64xi32>, !tosa.shape<3>) -> tensor<1x?x64xi32>
+  %wgt3 = tosa.reshape %wgt, %wgt_shape : (tensor<128x64xi32>, !tosa.shape<3>) -> tensor<1x128x64xi32>
 
-  %wgt3_t = tosa.transpose %wgt3 perms([0, 2, 1]) : (tensor<1x128x128xi32>) -> tensor<1x128x128xi32>
-  %acc3 = tosa.matmul %act3, %wgt3_t, %zp, %zp : (tensor<1x?x128xi32>, tensor<1x128x128xi32>, tensor<1xi32>, tensor<1xi32>) -> tensor<1x?x128xi32>
+  %wgt3_t = tosa.transpose %wgt3 perms([0, 2, 1]) : (tensor<1x128x64xi32>) -> tensor<1x64x128xi32>
+  %acc3 = tosa.matmul %act3, %wgt3_t, %zp, %zp : (tensor<1x?x64xi32>, tensor<1x64x128xi32>, tensor<1xi32>, tensor<1xi32>) -> tensor<1x?x128xi32>
   %out3 = tosa.add %acc3, %bias : (tensor<1x?x128xi32>, tensor<1x1x128xi32>) -> tensor<1x?x128xi32>
 
   %out = tosa.reshape %out3, %out_shape : (tensor<1x?x128xi32>, !tosa.shape<2>) -> tensor<?x128xi32>
@@ -377,13 +377,13 @@ func.func @matmul_bias(%act: tensor<?x128xi32>, %wgt: tensor<128x128xi32>) -> (t
 
 // INP-LABEL: module attributes {
 // INP:         util.func public @matmul_bias
-// INP-SAME:    (%[[ACT:.+]]: tensor<?x128xi32>, %[[WGT:.+]]: tensor<128x128xi32>)
+// INP-SAME:    (%[[ACT:.+]]: tensor<?x64xi32>, %[[WGT:.+]]: tensor<128x64xi32>)
 // INP:           %[[BIAS:.+]] = arith.constant dense<{{.+}}> : tensor<1x1x128xi32>
 // INP:           %[[ACT_EXP:.+]] = tensor.expand_shape %[[ACT]]
 // INP:           %[[WGT_EXP:.+]] = tensor.expand_shape %[[WGT]]
-// INP:           %[[WGT_T:.+]] = linalg.transpose ins(%[[WGT_EXP]] : tensor<1x128x128xi32>) {{.+}} permutation = [0, 2, 1]
+// INP:           %[[WGT_T:.+]] = linalg.transpose ins(%[[WGT_EXP]] : tensor<1x128x64xi32>) {{.+}} permutation = [0, 2, 1]
 // INP:           %[[ZERO:.+]] = linalg.fill
-// INP:           %[[MM:.+]] = linalg.batch_matmul ins(%[[ACT_EXP]], %[[WGT_T]] : tensor<1x?x128xi32>, tensor<1x128x128xi32>) outs(%[[ZERO]] : tensor<1x?x128xi32>)
+// INP:           %[[MM:.+]] = linalg.batch_matmul ins(%[[ACT_EXP]], %[[WGT_T]] : tensor<1x?x64xi32>, tensor<1x64x128xi32>) outs(%[[ZERO]] : tensor<1x?x128xi32>)
 // INP:           %[[ADD:.+]] = linalg.generic {{.+}} affine_map<(d0, d1, d2) -> (d0, 0, d2)>{{.+}} ins(%[[MM]], %[[BIAS]] : tensor<1x?x128xi32>, tensor<1x1x128xi32>)
 // INP:             arith.addi
 // INP:           %[[OUT:.+]] = tensor.collapse_shape %[[ADD]]
@@ -398,7 +398,7 @@ func.func @matmul_bias(%act: tensor<?x128xi32>, %wgt: tensor<128x128xi32>) -> (t
 // PRE:            %[[LHS:.+]] = flow.tensor.transfer
 // PRE:            %[[WGT:.+]] = flow.tensor.transfer
 // PRE:            %[[OUT:.+]] = linalg.batch_matmul
-// PRE-SAME:       ins(%[[LHS]], %[[WGT]] : tensor<1x?x128xi32>, tensor<1x128x128xi32>)
+// PRE-SAME:       ins(%[[LHS]], %[[WGT]] : tensor<1x?x64xi32>, tensor<1x64x128xi32>)
 // PRE-SAME:       outs(%[[ACC]] : tensor<1x?x128xi32>) -> tensor<1x?x128xi32>
 // PRE:            %{{.+}} = flow.tensor.transfer %[[OUT]]
 
@@ -409,7 +409,7 @@ func.func @matmul_bias(%act: tensor<?x128xi32>, %wgt: tensor<128x128xi32>) -> (t
 // FLW:             func.func @[[MATMUL_FUNC:.+]]
 // FLW:               %[[ACC:.+]] = linalg.fill
 // FLW:               %{{.+}} = linalg.batch_matmul
-// FLW:               ins(%{{.+}}, %{{.+}} : tensor<1x?x128xi32>, tensor<1x128x128xi32>)
+// FLW:               ins(%{{.+}}, %{{.+}} : tensor<1x?x64xi32>, tensor<1x64x128xi32>)
 // FLW:               outs(%[[ACC]] : tensor<1x?x128xi32>) -> tensor<1x?x128xi32>
 // FLW:         flow.executable private @[[BIAS_DISPATCH:.+]] {
 // FLW:         util.global private @{{.+}}

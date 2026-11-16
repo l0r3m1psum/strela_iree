@@ -1,6 +1,6 @@
 #include "estela/Transforms/Passes.h"
-#include "estela/Utils/KernelMatchers.h"
 #include "estela/Utils/Finders.h"
+#include "estela/Utils/StrelaContraction.h"
 
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
@@ -110,13 +110,15 @@ struct TransferWrapPass final
       return;
     }
 
+    strela::TargetDescAttr desc = estela::findStrelaTargetDesc(funcOp);
+
     // I am sure this makes naive assumptions and in some case it can fail but
     // for not it is good enough.
     pinAbiToDefaultDevice(funcOp);
 
     SmallVector<linalg::LinalgOp> candidates;
-    funcOp.walk([&](linalg::LinalgOp op) {
-      if (estela::isSupportedByStrela(op)) candidates.push_back(op);
+    funcOp.walk([&candidates,&desc](linalg::LinalgOp op) {
+      if (estela::isStrelaMatvec(op, desc)) candidates.push_back(op);
     });
 
     IRRewriter rewriter(&getContext());

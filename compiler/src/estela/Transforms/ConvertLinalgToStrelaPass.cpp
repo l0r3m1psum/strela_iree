@@ -1,4 +1,6 @@
 #include "estela/Transforms/Passes.h"
+#include "estela/Utils/Finders.h"
+#include "estela/Utils/StrelaContraction.h"
 
 #include <mutex>
 
@@ -11,7 +13,6 @@
 
 #include "estela/StrelaIR/StrelaDialect.h"
 #include "estela/StrelaIR/StrelaOps.h"
-#include "estela/Utils/KernelMatchers.h"
 
 static std::mutex printMutex;
 
@@ -42,32 +43,31 @@ namespace mlir::estela {
 } // namespace mlir::estela
 
 using namespace mlir;
-using mlir::estela::isStrelaLinalgMatvec;
 
 namespace {
 
 struct ConvertLinalgMatvecToStrela
-  : public OpRewritePattern<linalg::BatchMatmulOp> {
-  using OpRewritePattern<linalg::BatchMatmulOp>::OpRewritePattern;
+  : public OpInterfaceRewritePattern<linalg::LinalgOp> {
+
+  strela::TargetDescAttr desc;
+
+  ConvertLinalgMatvecToStrela(MLIRContext *context, strela::TargetDescAttr desc)
+      : OpInterfaceRewritePattern<linalg::LinalgOp>(context), desc(desc) {}
 
   LogicalResult
   matchAndRewrite(
-    linalg::BatchMatmulOp matmulOp, PatternRewriter &rewriter
+    linalg::LinalgOp op, PatternRewriter &rewriter
   ) const override {
-    LogicalResult result = isStrelaLinalgMatvec(matmulOp);
-
+    if (!estela::isStrelaMatvec(op, desc)) {
+      return rewriter.notifyMatchFailure(op, "not a STRELA matvec");
+    }
     // The zero fill init is dropped: the kernel computes from zero, and the
     // fill is then dead and erased by the driver.
-    if (succeeded(result)) {
-      rewriter.replaceOpWithNewOp<strela::MatvecOp>(
-        matmulOp,
-        matmulOp.getResultTypes(),
-        matmulOp.getDpsInputs()[0],
-        matmulOp.getDpsInputs()[1]
-      );
-    }
-
-    return result;
+    SmallVector<Value> inputs = op.getDpsInputs();
+    rewriter.replaceOpWithNewOp<strela::MatvecOp>(
+      op, op->getResultTypes(), inputs[0], inputs[1]
+    );
+    return success();
   }
 };
 
@@ -77,10 +77,10 @@ struct ConvertLinalgToStrelaPass final
     func::FuncOp funcOp = getOperation();
     MLIRContext *context = &getContext();
 
+    strela::TargetDescAttr desc = estela::findStrelaTargetDesc(funcOp);
+
     RewritePatternSet patterns(context);
-    patterns.add<
-      ConvertLinalgMatvecToStrela
-    >(context);
+    patterns.add<ConvertLinalgMatvecToStrela>(context, desc);
 
     GreedyRewriteConfig config;
     if (failed(applyPatternsGreedily(funcOp, std::move(patterns), config))) {
