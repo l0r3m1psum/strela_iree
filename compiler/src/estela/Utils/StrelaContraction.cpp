@@ -80,7 +80,7 @@ isStrelaMatvec(linalg::LinalgOp op, strela::TargetDescAttr desc) {
     return false;
   }
 
- 	// TODO: this is done in multiple places and should be put in a utility function.
+  // TODO: this is done in multiple places and should be put in a utility function.
   // The kernel has no accumulator input, so it can only compute from 0.
   auto fillOp = op.getDpsInits()[0].getDefiningOp<linalg::FillOp>();
   APInt init;

@@ -340,7 +340,9 @@ func.func @matvec_const_weights(%x: tensor<1x1x16xi32>) -> tensor<1x1x3xi32> {
 
 // This is, strictly speaking not valid TOSA (because tosa.matmul does not
 // support int32). TOSA matmul is also necessarily a batched matrix
-// multiplication hence the reshape.
+// multiplication hence the reshape. Note that the the weight is not x128x128
+// because otherwise it would exceed the limit of the stride being strictly less
+// then 128*128 = 16384.
 
 func.func @matmul_bias(%act: tensor<?x64xi32>, %wgt: tensor<128x64xi32>) -> (tensor<?x128xi32>) {
   %act_shape = tosa.const_shape values(dense<[1, -1, 64]> : tensor<3xindex>) : () -> !tosa.shape<3>
