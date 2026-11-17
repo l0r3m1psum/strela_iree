@@ -10,12 +10,11 @@ include "mlir/Interfaces/SideEffectInterfaces.td"  // Pure
 def MatvecOp : Strela_Op<"matvec", [Pure]> {
   let summary = "Batched matrix multiplication with a zero accumulator";
   let description = [{
-    `result[0, n, f] = sum_c lhs[0, n, c] * rhs[0, c, f]`, i.e. a
-    `linalg.batch_matmul` with a batch of one whose init is a zero fill. The
-    kernel has no accumulator input, so a bias has to be added afterwards.
+    `result[n, f] = sum_c lhs[n, c] * rhs[c, f]`, i.e. a `linalg.matmul` whose
+    init is a zero fill.
 
     ```mlir
-    %0 = strela.matvec %x, %w : tensor<1x?x128xi32>, tensor<1x128x128xi32> -> tensor<1x?x128xi32>
+    %0 = strela.matvec %x, %w : tensor<?x16xi32>, tensor<16x8xi32> -> tensor<?x8xi32>
     ```
   }];
   let arguments = (ins I32Tensor:$lhs, I32Tensor:$rhs);

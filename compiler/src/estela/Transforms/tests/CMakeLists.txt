@@ -11,6 +11,7 @@ iree_lit_test_suite(
     "link_executables.mlir"
     "materialize_bindings.mlir"
     "transfer_wrap.mlir"
+    "convert_linalg_to_strela.mlir"
   TOOLS
     FileCheck
     iree-opt

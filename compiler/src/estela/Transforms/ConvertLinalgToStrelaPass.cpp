@@ -8,6 +8,8 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
@@ -46,6 +48,41 @@ using namespace mlir;
 
 namespace {
 
+// collapse_shape when the target has lower rank, expand_shape when higher,
+// nothing when equal.
+static FailureOr<Value>
+reshapeTo(OpBuilder &b, Location loc, Value v, RankedTensorType tgtType) {
+  using Reassociation = std::optional<SmallVector<ReassociationIndices>>;
+
+  FailureOr<Value> res = failure();
+  auto srcType = cast<RankedTensorType>(v.getType());
+  int64_t srcTypeRank = srcType.getRank();
+  int64_t tgtTypeRank = tgtType.getRank();
+  if (srcType == tgtType) {
+    res = v;
+  } else if (srcTypeRank == tgtTypeRank) { // e.g. [16, 1] becomes [1, 16]
+    SmallVector<int64_t> squeezed;
+    for (int64_t d : srcType.getShape()) {
+      if (d != 1) squeezed.push_back(d);
+    }
+    assert(static_cast<int64_t>(squeezed.size()) < srcTypeRank);
+    auto squeezedType = RankedTensorType::get(squeezed, srcType.getElementType());
+    res = reshapeTo(b, loc, *reshapeTo(b, loc, v, squeezedType), tgtType);
+  } else if (
+    Reassociation reassoc = getReassociationIndicesForReshape(srcType, tgtType)
+  ) {
+    if (srcTypeRank > tgtTypeRank) {
+      res = tensor::CollapseShapeOp::create(b, loc, tgtType, v, *reassoc)
+        .getResult();
+    } else {
+      res = tensor::ExpandShapeOp::create(b, loc, tgtType, v, *reassoc)
+        .getResult();
+    }
+  }
+
+  return res;
+}
+
 struct ConvertLinalgMatvecToStrela
   : public OpInterfaceRewritePattern<linalg::LinalgOp> {
 
@@ -58,15 +95,27 @@ struct ConvertLinalgMatvecToStrela
   matchAndRewrite(
     linalg::LinalgOp op, PatternRewriter &rewriter
   ) const override {
-    if (!estela::isStrelaMatvec(op, desc)) {
+    FailureOr<estela::StrelaMatvecShape> shape =
+      estela::matchStrelaContraction(op, desc);
+    if (failed(shape)) {
       return rewriter.notifyMatchFailure(op, "not a STRELA matvec");
     }
-    // The zero fill init is dropped: the kernel computes from zero, and the
-    // fill is then dead and erased by the driver.
+    auto [n, c, f] = *shape;
+
+    // To N x C times C x F and back. matchStrelaContraction checked that the
+    // operands differ from these shapes only by unit dims, so every reshape
+    // exists.
+    Location loc = op.getLoc();
+    Type i32 = rewriter.getI32Type();
     SmallVector<Value> inputs = op.getDpsInputs();
-    rewriter.replaceOpWithNewOp<strela::MatvecOp>(
-      op, op->getResultTypes(), inputs[0], inputs[1]
+    Value lhs = *reshapeTo(rewriter, loc, inputs[0], RankedTensorType::get({n, c}, i32));
+    Value rhs = *reshapeTo(rewriter, loc, inputs[1], RankedTensorType::get({c, f}, i32));
+    // The zero fill init is dropped: the kernel computes from zero.
+    Value y = strela::MatvecOp::create(
+      rewriter, loc, RankedTensorType::get({n, f}, i32), lhs, rhs
     );
+    auto resultType = cast<RankedTensorType>(op->getResult(0).getType());
+    rewriter.replaceOp(op, *reshapeTo(rewriter, loc, y, resultType));
     return success();
   }
 };

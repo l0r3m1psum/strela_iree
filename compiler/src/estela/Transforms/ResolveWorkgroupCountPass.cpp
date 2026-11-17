@@ -53,7 +53,7 @@ buildCount(
   }
 
   auto rhsType = cast<RankedTensorType>(matvecOp.getRhs().getType());
-  int64_t features = rhsType.getDimSize(2);
+  int64_t features = rhsType.getDimSize(1);
   if (ShapedType::isDynamic(features) || features < strelaMatvecFeaturesPerJob) {
     return matvecOp.emitOpError("needs a static F of at least ")
            << strelaMatvecFeaturesPerJob;
@@ -70,7 +70,7 @@ buildCount(
                                 "MaterializeBindings");
   }
   FailureOr<Value> y =
-    resolveSize(builder, loc, countRegion, lhsLoad.getMixedSizes()[1]);
+    resolveSize(builder, loc, countRegion, lhsLoad.getMixedSizes()[0]);
   if (failed(y)) {
     return lhsLoad.emitOpError("cannot tell which workload value is N");
   }

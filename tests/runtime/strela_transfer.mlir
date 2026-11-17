@@ -31,7 +31,7 @@
 // RUN:   %s -o /dev/null
 
 // The add and the ReLU stay on the CPU: STRELA only runs the matvec.
-// CHECK:     strela.matvec %{{.+}}, %{{.+}} : tensor<1x8x16xi32>, tensor<1x16x9xi32> -> tensor<1x8x9xi32>
+// CHECK:     strela.matvec %{{.+}}, %{{.+}} : tensor<8x16xi32>, tensor<16x9xi32> -> tensor<8x9xi32>
 // CHECK-NOT: strela.matvec
 
 module attributes {

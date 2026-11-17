@@ -7,13 +7,16 @@
 
 namespace mlir::estela {
 
-// `init + lhs * rhs` with two inputs, whatever the op is called: the loop dims
-// that play batch, M, N (F) and K (C).
-FailureOr<linalg::ContractionDimensions> matchContraction(linalg::LinalgOp op);
+// The sizes of strela.matvec, N x C times C x F. N may be dynamic, C and F are
+// static.
+struct StrelaMatvecShape {
+  int64_t n, c, f;
+};
 
-// Whether the matvec kernel runs `op` on the hardware `desc` describes.
-// False for every op when `desc` is null.
-bool isStrelaMatvec(linalg::LinalgOp op, strela::TargetDescAttr desc);
+// The shape the matvec kernel runs `op` with on the hardware `desc` describes,
+// or failure when it cannot run it. Failure for every op when `desc` is null.
+FailureOr<StrelaMatvecShape>
+matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc);
 
 } // namespace mlir::estela
 

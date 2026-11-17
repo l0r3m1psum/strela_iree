@@ -26,27 +26,26 @@ verifyBindingOffsets(Operation *op, std::optional<uint64_t> offsetOrdinal,
   return success();
 }
 
-// 1xNxC times 1xCxF gives 1xNxF; a dynamic size is checked against nothing.
+// TODO: is the dynamic shape comparison still needed for all dimensions?
+static bool
+compatible(int64_t a, int64_t b) {
+  return ShapedType::isDynamic(a) || ShapedType::isDynamic(b) || a == b;
+}
+
+// NxC times CxF gives NxF; a dynamic size is checked against nothing.
 LogicalResult MatvecOp::verify() {
   auto lhsType = cast<RankedTensorType>(getLhs().getType());
   auto rhsType = cast<RankedTensorType>(getRhs().getType());
-  auto resultType = cast<RankedTensorType>(getResult().getType());
-  if (lhsType.getRank() != 3 || rhsType.getRank() != 3 || resultType.getRank() != 3) {
-    return emitOpError("expected rank 3 operands and result");
+  auto outType = cast<RankedTensorType>(getResult().getType());
+  if (lhsType.getRank() != 2 || rhsType.getRank() != 2 || outType.getRank() != 2) {
+    return emitOpError("expected rank 2 operands and result");
   }
 
-  auto compatible = [](int64_t a, int64_t b) {
-    return ShapedType::isDynamic(a) || ShapedType::isDynamic(b) || a == b;
-  };
-  if (lhsType.getDimSize(0) != 1 || !compatible(rhsType.getDimSize(0), 1) ||
-      !compatible(resultType.getDimSize(0), 1)) {
-    return emitOpError("expected a batch of one");
-  }
-  if (!compatible(lhsType.getDimSize(2), rhsType.getDimSize(1))) {
+  if (!compatible(lhsType.getDimSize(1), rhsType.getDimSize(0))) {
     return emitOpError("lhs and rhs disagree on the reduction size");
   }
-  if (!compatible(resultType.getDimSize(1), lhsType.getDimSize(1)) ||
-      !compatible(resultType.getDimSize(2), rhsType.getDimSize(2))) {
+  if (!compatible(outType.getDimSize(0), lhsType.getDimSize(0)) ||
+      !compatible(outType.getDimSize(1), rhsType.getDimSize(1))) {
     return emitOpError("result shape does not match lhs rows and rhs columns");
   }
   return success();

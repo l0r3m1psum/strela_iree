@@ -173,10 +173,10 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // EXC:               hal.return %[[C3]], %[[N]], %{{.+}} : index, index, index
 // EXC:             builtin.module {
 // EXC:               func.func @{{.+}}() {
-// EXC:                 %[[X:.+]] = strela.binding_load binding(0) byte_offset 576 : tensor<1x?x16xi32>
-// EXC:                 %[[W:.+]] = strela.binding_load binding(0) : tensor<1x16x9xi32>
-// EXC:                 %[[Y:.+]] = strela.matvec %[[X]], %[[W]] : tensor<1x?x16xi32>, tensor<1x16x9xi32> -> tensor<1x?x9xi32>
-// EXC:                 strela.binding_store %[[Y]], binding(1) : tensor<1x?x9xi32>
+// EXC:                 %[[X:.+]] = strela.binding_load binding(0) byte_offset 576 : tensor<?x16xi32>
+// EXC:                 %[[W:.+]] = strela.binding_load binding(0) : tensor<16x9xi32>
+// EXC:                 %[[Y:.+]] = strela.matvec %[[X]], %[[W]] : tensor<?x16xi32>, tensor<16x9xi32> -> tensor<?x9xi32>
+// EXC:                 strela.binding_store %[[Y]], binding(1) : tensor<?x9xi32>
 
 // Finally compilation should conclude without problems...
 
@@ -284,7 +284,7 @@ func.func @matvec_relu(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable private @{{.+}} {
 // EXC:           hal.executable.variant public @strela_bitstream
-// EXC:                 %{{.+}} = strela.matvec %{{.+}}, %{{.+}} : tensor<1x?x16xi32>, tensor<1x16x9xi32> -> tensor<1x?x9xi32>
+// EXC:                 %{{.+}} = strela.matvec %{{.+}}, %{{.+}} : tensor<?x16xi32>, tensor<16x9xi32> -> tensor<?x9xi32>
 // EXC:         hal.executable private @{{.+}} {
 // EXC:           hal.executable.variant public @vmvx_bytecode_fb
 
@@ -332,9 +332,9 @@ func.func @matvec_const_weights(%x: tensor<1x1x16xi32>) -> tensor<1x1x3xi32> {
 
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable.export public @{{.+}} layout(#hal.pipeline.layout<bindings = [{{.+}}, #hal.pipeline.binding<storage_buffer, ReadOnly>, {{.+}}]
-// EXC:                 %[[X:.+]] = strela.binding_load binding(0) : tensor<1x1x16xi32>
-// EXC:                 %[[W:.+]] = strela.binding_load binding(1) : tensor<1x16x3xi32>
-// EXC:                 %{{.+}} = strela.matvec %[[X]], %[[W]] : tensor<1x1x16xi32>, tensor<1x16x3xi32> -> tensor<1x1x3xi32>
+// EXC:                 %[[X:.+]] = strela.binding_load binding(0) : tensor<1x16xi32>
+// EXC:                 %[[W:.+]] = strela.binding_load binding(1) : tensor<16x3xi32>
+// EXC:                 %{{.+}} = strela.matvec %[[X]], %[[W]] : tensor<1x16xi32>, tensor<16x3xi32> -> tensor<1x3xi32>
 
 // -----
 

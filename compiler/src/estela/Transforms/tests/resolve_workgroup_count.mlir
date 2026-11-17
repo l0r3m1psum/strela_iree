@@ -31,13 +31,13 @@ hal.executable private @matvec_single_job {
     builtin.module {
       func.func @matvec_single_job() {
         %c0 = arith.constant 0 : index
-        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x1x16xi32>>
-        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16x3xi32>>
-        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x1x3xi32>>
-        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0, 0, 0], sizes = [1, 1, 16], strides = [1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x1x16xi32>> -> tensor<1x1x16xi32>
-        %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [0, 0, 0], sizes = [1, 16, 3], strides = [1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16x3xi32>> -> tensor<1x16x3xi32>
-        %5 = strela.matvec %3, %4 : tensor<1x1x16xi32>, tensor<1x16x3xi32> -> tensor<1x1x3xi32>
-        iree_tensor_ext.dispatch.tensor.store %5, %2, offsets = [0, 0, 0], sizes = [1, 1, 3], strides = [1, 1, 1] : tensor<1x1x3xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x1x3xi32>>
+        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16xi32>>
+        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x3xi32>>
+        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x3xi32>>
+        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0, 0], sizes = [1, 16], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16xi32>> -> tensor<1x16xi32>
+        %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [0, 0], sizes = [16, 3], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x3xi32>> -> tensor<16x3xi32>
+        %5 = strela.matvec %3, %4 : tensor<1x16xi32>, tensor<16x3xi32> -> tensor<1x3xi32>
+        iree_tensor_ext.dispatch.tensor.store %5, %2, offsets = [0, 0], sizes = [1, 3], strides = [1, 1] : tensor<1x3xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x3xi32>>
         return
       }
     }
@@ -71,13 +71,13 @@ hal.executable private @matvec_static {
     builtin.module {
       func.func @matvec_static() {
         %c0 = arith.constant 0 : index
-        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x4x128xi32>>
-        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x128x128xi32>>
-        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x4x128xi32>>
-        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0, 0, 0], sizes = [1, 4, 128], strides = [1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x4x128xi32>> -> tensor<1x4x128xi32>
-        %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [0, 0, 0], sizes = [1, 128, 128], strides = [1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x128x128xi32>> -> tensor<1x128x128xi32>
-        %5 = strela.matvec %3, %4 : tensor<1x4x128xi32>, tensor<1x128x128xi32> -> tensor<1x4x128xi32>
-        iree_tensor_ext.dispatch.tensor.store %5, %2, offsets = [0, 0, 0], sizes = [1, 4, 128], strides = [1, 1, 1] : tensor<1x4x128xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x4x128xi32>>
+        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<4x128xi32>>
+        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<128x128xi32>>
+        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<4x128xi32>>
+        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0, 0], sizes = [4, 128], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<4x128xi32>> -> tensor<4x128xi32>
+        %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [0, 0], sizes = [128, 128], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<128x128xi32>> -> tensor<128x128xi32>
+        %5 = strela.matvec %3, %4 : tensor<4x128xi32>, tensor<128x128xi32> -> tensor<4x128xi32>
+        iree_tensor_ext.dispatch.tensor.store %5, %2, offsets = [0, 0], sizes = [4, 128], strides = [1, 1] : tensor<4x128xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<4x128xi32>>
         return
       }
     }
@@ -115,13 +115,13 @@ hal.executable private @matvec_dynamic {
         %cst = hal.interface.constant.load layout(#layout) ordinal(0) : i32
         %idx = arith.index_castui %cst : i32 to index
         %n = iree_tensor_ext.dispatch.workload.ordinal %idx, 0 : index
-        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x?x16xi32>>{%n}
-        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16x9xi32>>
-        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x?x9xi32>>{%n}
-        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0, 0, 0], sizes = [1, %n, 16], strides = [1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x?x16xi32>>{%n} -> tensor<1x?x16xi32>
-        %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [0, 0, 0], sizes = [1, 16, 9], strides = [1, 1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16x9xi32>> -> tensor<1x16x9xi32>
-        %5 = strela.matvec %3, %4 : tensor<1x?x16xi32>, tensor<1x16x9xi32> -> tensor<1x?x9xi32>
-        iree_tensor_ext.dispatch.tensor.store %5, %2, offsets = [0, 0, 0], sizes = [1, %n, 9], strides = [1, 1, 1] : tensor<1x?x9xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x?x9xi32>>{%n}
+        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<?x16xi32>>{%n}
+        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x9xi32>>
+        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<?x9xi32>>{%n}
+        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [0, 0], sizes = [%n, 16], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<?x16xi32>>{%n} -> tensor<?x16xi32>
+        %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [0, 0], sizes = [16, 9], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x9xi32>> -> tensor<16x9xi32>
+        %5 = strela.matvec %3, %4 : tensor<?x16xi32>, tensor<16x9xi32> -> tensor<?x9xi32>
+        iree_tensor_ext.dispatch.tensor.store %5, %2, offsets = [0, 0], sizes = [%n, 9], strides = [1, 1] : tensor<?x9xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<?x9xi32>>{%n}
         return
       }
     }
@@ -147,11 +147,11 @@ hal.executable private @matvec_materialized {
     }
     builtin.module {
       func.func @matvec_materialized() {
-        %0 = strela.binding_load binding(0) : tensor<1x?x16xi32>
-        %1 = strela.binding_load binding(1) : tensor<1x16x9xi32>
+        %0 = strela.binding_load binding(0) : tensor<?x16xi32>
+        %1 = strela.binding_load binding(1) : tensor<16x9xi32>
         // expected-error @+1 {{lhs is not a dispatch tensor load}}
-        %2 = strela.matvec %0, %1 : tensor<1x?x16xi32>, tensor<1x16x9xi32> -> tensor<1x?x9xi32>
-        strela.binding_store %2, binding(2) : tensor<1x?x9xi32>
+        %2 = strela.matvec %0, %1 : tensor<?x16xi32>, tensor<16x9xi32> -> tensor<?x9xi32>
+        strela.binding_store %2, binding(2) : tensor<?x9xi32>
         return
       }
     }

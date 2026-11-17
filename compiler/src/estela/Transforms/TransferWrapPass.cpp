@@ -118,7 +118,9 @@ struct TransferWrapPass final
 
     SmallVector<linalg::LinalgOp> candidates;
     funcOp.walk([&candidates,&desc](linalg::LinalgOp op) {
-      if (estela::isStrelaMatvec(op, desc)) candidates.push_back(op);
+      if (succeeded(estela::matchStrelaContraction(op, desc))) {
+        candidates.push_back(op);
+      }
     });
 
     IRRewriter rewriter(&getContext());

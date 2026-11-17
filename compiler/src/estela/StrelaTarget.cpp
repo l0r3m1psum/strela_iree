@@ -5,6 +5,7 @@
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 #include "iree/compiler/Dialect/Stream/IR/StreamTypes.h"
 #include "iree/compiler/Utils/FlatbufferUtils.h"
+#include "iree/compiler/Codegen/Common/Passes.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
@@ -110,8 +111,8 @@ getMatvecExport(
   if (!rhsType.hasStaticShape()) {
     return matvecOp.emitOpError("needs a static rhs, got ") << rhsType;
   }
-  int64_t c = rhsType.getDimSize(1);
-  int64_t f = rhsType.getDimSize(2);
+  int64_t c = rhsType.getDimSize(0);
+  int64_t f = rhsType.getDimSize(1);
   if (f < strelaMatvecFeaturesPerJob) {
     return matvecOp.emitOpError("needs F of at least ")
            << strelaMatvecFeaturesPerJob << ", got " << f;
@@ -294,6 +295,12 @@ StrelaTargetBackend::buildTranslationPassPipeline(
   passManager.nest<ModuleOp>().addNestedPass<func::FuncOp>(
     estela::createConvertLinalgToStrelaPass()
   );
+
+  // Simplifies away {collapse,expand}_shape introduced by
+  // createConvertLinalgToStrelaPass.
+  // NOTE: maybe it is better to do it in the preprocessing and
+  // global-optimization takes care of it?
+  passManager.addPass(createFoldReshapeIntoInterfaceTensorPass());
 
   // Needs the workload ordinals MaterializeBindings erases. A second nest,
   // because adding to the first module pipeline would run before this.

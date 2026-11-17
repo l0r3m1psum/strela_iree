@@ -29,17 +29,17 @@
 //
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
-// CHECK:     %[[X:.+]] = strela.binding_load binding(0) : tensor<1x8x16xi32>
-// CHECK:     %[[W:.+]] = strela.binding_load binding(1) : tensor<1x16x9xi32>
-// CHECK:     %[[Y:.+]] = strela.matvec %[[X]], %[[W]] : tensor<1x8x16xi32>, tensor<1x16x9xi32> -> tensor<1x8x9xi32>
-// CHECK:     strela.binding_store %[[Y]], binding(2) : tensor<1x8x9xi32>
+// CHECK:     %[[X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
+// CHECK:     %[[W:.+]] = strela.binding_load binding(1) : tensor<16x9xi32>
+// CHECK:     %[[Y:.+]] = strela.matvec %[[X]], %[[W]] : tensor<8x16xi32>, tensor<16x9xi32> -> tensor<8x9xi32>
+// CHECK:     strela.binding_store %[[Y]], binding(2) : tensor<8x9xi32>
 
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
-// UNFUSED:     %[[U_X:.+]] = strela.binding_load binding(0) : tensor<1x8x16xi32>
-// UNFUSED:     %[[U_W:.+]] = strela.binding_load binding(1) : tensor<1x16x9xi32>
+// UNFUSED:     %[[U_X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
+// UNFUSED:     %[[U_W:.+]] = strela.binding_load binding(1) : tensor<16x9xi32>
 // UNFUSED:     %[[U_Y:.+]] = strela.matvec %[[U_X]], %[[U_W]]
-// UNFUSED:     strela.binding_store %[[U_Y]], binding(2) : tensor<1x8x9xi32>
+// UNFUSED:     strela.binding_store %[[U_Y]], binding(2) : tensor<8x9xi32>
 
 module attributes {
   stream.topology = #hal.device.topology<links = [
@@ -91,17 +91,17 @@ module attributes {
 //
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
-// CHECK:     %[[P_X:.+]] = strela.binding_load binding(0) : tensor<1x8x16xi32>
-// CHECK:     %[[P_W:.+]] = strela.binding_load binding(0) byte_offset 512 : tensor<1x16x9xi32>
+// CHECK:     %[[P_X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
+// CHECK:     %[[P_W:.+]] = strela.binding_load binding(0) byte_offset 512 : tensor<16x9xi32>
 // CHECK:     %[[P_Y:.+]] = strela.matvec %[[P_X]], %[[P_W]]
-// CHECK:     strela.binding_store %[[P_Y]], binding(1) : tensor<1x8x9xi32>
+// CHECK:     strela.binding_store %[[P_Y]], binding(1) : tensor<8x9xi32>
 
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
-// UNFUSED:     %[[V_X:.+]] = strela.binding_load binding(0) : tensor<1x8x16xi32>
-// UNFUSED:     %[[V_W:.+]] = strela.binding_load binding(1) : tensor<1x16x9xi32>
+// UNFUSED:     %[[V_X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
+// UNFUSED:     %[[V_W:.+]] = strela.binding_load binding(1) : tensor<16x9xi32>
 // UNFUSED:     %[[V_Y:.+]] = strela.matvec %[[V_X]], %[[V_W]]
-// UNFUSED:     strela.binding_store %[[V_Y]], binding(2) : tensor<1x8x9xi32>
+// UNFUSED:     strela.binding_store %[[V_Y]], binding(2) : tensor<8x9xi32>
 
 module {
   func.func @main(
@@ -146,17 +146,17 @@ module {
 //
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
-// CHECK:     %[[S_X:.+]] = strela.binding_load binding(0) offset_ordinal {{[0-9]+}} : tensor<1x8x16xi32>
-// CHECK:     %[[S_W:.+]] = strela.binding_load binding(0) offset_ordinal {{[0-9]+}} : tensor<1x16x9xi32>
+// CHECK:     %[[S_X:.+]] = strela.binding_load binding(0) offset_ordinal {{[0-9]+}} : tensor<8x16xi32>
+// CHECK:     %[[S_W:.+]] = strela.binding_load binding(0) offset_ordinal {{[0-9]+}} : tensor<16x9xi32>
 // CHECK:     %[[S_Y:.+]] = strela.matvec %[[S_X]], %[[S_W]]
-// CHECK:     strela.binding_store %[[S_Y]], binding(1) offset_ordinal {{[0-9]+}} : tensor<1x8x9xi32>
+// CHECK:     strela.binding_store %[[S_Y]], binding(1) offset_ordinal {{[0-9]+}} : tensor<8x9xi32>
 
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
-// UNFUSED:     %[[W_X:.+]] = strela.binding_load binding(0) : tensor<1x8x16xi32>
-// UNFUSED:     %[[W_W:.+]] = strela.binding_load binding(1) : tensor<1x16x9xi32>
+// UNFUSED:     %[[W_X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
+// UNFUSED:     %[[W_W:.+]] = strela.binding_load binding(1) : tensor<16x9xi32>
 // UNFUSED:     %[[W_Y:.+]] = strela.matvec %[[W_X]], %[[W_W]]
-// UNFUSED:     strela.binding_store %[[W_Y]], binding(2) : tensor<1x8x9xi32>
+// UNFUSED:     strela.binding_store %[[W_Y]], binding(2) : tensor<8x9xi32>
 
 module {
   func.func @main(
