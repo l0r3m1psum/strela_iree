@@ -8,7 +8,7 @@ include "mlir/Interfaces/InferTypeOpInterface.td"  // SameOperandsAndResultType
 include "mlir/Interfaces/SideEffectInterfaces.td"  // Pure
 
 def MatvecOp : Strela_Op<"matvec", [Pure]> {
-  let summary = "Batched matrix multiplication with a zero accumulator";
+  let summary = "Matrix multiplication with a zero accumulator";
   let description = [{
     `result[n, f] = sum_c lhs[n, c] * rhs[c, f]`, i.e. a `linalg.matmul` whose
     init is a zero fill.
