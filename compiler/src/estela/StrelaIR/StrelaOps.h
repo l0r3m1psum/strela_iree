@@ -9,6 +9,7 @@
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
+#include "estela/StrelaIR/StrelaAttrs.h"
 #include "estela/StrelaIR/StrelaDialect.h"
 
 // Generated op declarations. The matching definitions live in StrelaOps.cpp so

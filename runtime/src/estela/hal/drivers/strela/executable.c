@@ -65,7 +65,7 @@ iree_hal_strela_term_verify(iree_hal_strela_WorkgroupTermDef_struct_t term, uint
 // `word_stride` is NULL for outputs, which have none.
 static iree_status_t
 iree_hal_strela_column_verify(
-  iree_hal_strela_AddressDef_table_t address,
+  iree_hal_strela_ColumnAddressDef_table_t address,
   iree_hal_strela_ValueDef_struct_t word_count,
   iree_hal_strela_ValueDef_struct_t word_stride,
   bool is_input,
@@ -77,22 +77,19 @@ iree_hal_strela_column_verify(
     IREE_RETURN_IF_ERROR(iree_hal_strela_value_verify(word_stride, constant_count));
   }
   IREE_RETURN_IF_ERROR(iree_hal_strela_value_verify(
-    iree_hal_strela_AddressDef_offset_get(address), constant_count
+    iree_hal_strela_ColumnAddressDef_base_get(address), constant_count
   ));
   IREE_RETURN_IF_ERROR(iree_hal_strela_term_verify(
-    iree_hal_strela_AddressDef_workgroup_x_get(address), constant_count
+    iree_hal_strela_ColumnAddressDef_wg_x_params_get(address), constant_count
   ));
   IREE_RETURN_IF_ERROR(iree_hal_strela_term_verify(
-    iree_hal_strela_AddressDef_workgroup_y_get(address), constant_count
-  ));
-  IREE_RETURN_IF_ERROR(iree_hal_strela_term_verify(
-    iree_hal_strela_AddressDef_workgroup_z_get(address), constant_count
+    iree_hal_strela_ColumnAddressDef_wg_y_params_get(address), constant_count
   ));
 
   // An unused column may name any binding.
   bool unused = !iree_hal_strela_ValueDef_is_constant_get(word_count)
     && iree_hal_strela_ValueDef_value_get(word_count) == 0;
-  if (!unused && iree_hal_strela_AddressDef_binding_get(address) >= binding_count) {
+  if (!unused && iree_hal_strela_ColumnAddressDef_binding_get(address) >= binding_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "column binding out of range");
   }
   return iree_ok_status();

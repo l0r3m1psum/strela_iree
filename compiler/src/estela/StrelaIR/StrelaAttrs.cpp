@@ -15,6 +15,20 @@ StrelaDialect::registerAttributes() {
   >();
 }
 
+LogicalResult
+ColAddrAttr::verify(
+  function_ref<InFlightDiagnostic()> emitError, uint32_t binding,
+  Attribute offset, WgAxisParamsAttr wgXParams, WgAxisParamsAttr wgYParams
+) {
+  auto intAttr = dyn_cast<IntegerAttr>(offset);
+  if (!isa<PushConstantAttr>(offset) &&
+      !(intAttr && intAttr.getType().isSignlessInteger(32))) {
+    return emitError() << "offset must be an i32 or a #strela.push_constant, "
+                       << "got " << offset;
+  }
+  return success();
+}
+
 } // namespace mlir::strela
 
 #define GET_ATTRDEF_CLASSES

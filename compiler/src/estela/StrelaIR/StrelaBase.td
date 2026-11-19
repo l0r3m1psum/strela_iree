@@ -13,11 +13,11 @@ def Strela_Dialect : Dialect {
   }];
 }
 
-class Strela_Op<string mnemonic, list<Trait> traits = []> :
-    Op<Strela_Dialect, mnemonic, traits>;
+class Strela_Op<string mnemonic, list<Trait> traits = []>
+  : Op<Strela_Dialect, mnemonic, traits>;
 
 class Strela_Attr<string name, string attrMnemonic, list<Trait> traits = []>
-    : AttrDef<Strela_Dialect, name, traits> {
+  : AttrDef<Strela_Dialect, name, traits> {
   let mnemonic = attrMnemonic;
 }
 

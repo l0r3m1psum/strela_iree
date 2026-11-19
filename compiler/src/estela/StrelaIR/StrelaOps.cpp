@@ -1,5 +1,7 @@
 #include "estela/StrelaIR/StrelaOps.h"
 
+#include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
+
 namespace mlir::strela {
 
 // Both binding ops describe their byte offset the same way: at most one of the
@@ -57,6 +59,22 @@ LogicalResult BindingLoadOp::verify() {
 
 LogicalResult BindingStoreOp::verify() {
   return verifyBindingOffsets(*this, getOffsetOrdinal(), getByteOffset());
+}
+
+// One column of each kind per fabric column. Checked only inside a STRELA
+// executable variant, the only place the description can be found from here.
+LogicalResult JobOp::verify() {
+  auto targetAttr = iree_compiler::IREE::HAL::ExecutableTargetAttr::lookup(*this);
+  DictionaryAttr config = targetAttr ? targetAttr.getConfiguration() : nullptr;
+  auto desc = config ? config.getAs<TargetDescAttr>(targetDescKey) : nullptr;
+  if (!desc) return success();
+  if (getInputs().size() != desc.getColumns() ||
+      getOutputs().size() != desc.getColumns()) {
+    return emitOpError() << "has " << getInputs().size() << " input and "
+                         << getOutputs().size() << " output columns, the "
+                         << "fabric has " << desc.getColumns();
+  }
+  return success();
 }
 
 } // namespace mlir::strela

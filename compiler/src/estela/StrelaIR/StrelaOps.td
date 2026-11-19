@@ -25,23 +25,11 @@ def MatvecOp : Strela_Op<"matvec", [Pure]> {
   let hasVerifier = 1;
 }
 
-// Common documentation for the two ops below.
-//
-// `binding` indexes the dispatch binding list, i.e. the `hal.pipeline.layout`
-// binding ordinal. The byte offset of the subspan within that binding takes one
-// of three forms, and at most one of the two optional attributes is ever set:
-//
-//   * neither attribute: the subspan starts at byte zero.
-//   * `byte_offset`: a compile-time constant offset. Stream's
-//     FuseDispatchBindings produces these when it merges several operands into
-//     one buffer and every dispatch site of the executable agrees on where each
-//     one sits, so the offset folds to an `arith.constant`.
-//   * `offset_ordinal`: the push constant holding an offset that differs per
-//     dispatch site. One 32 bit constant, which is what the executable format
-//     can describe.
+// TODO: remove
 class Strela_BindingOp<string mnemonic, list<Trait> traits = []> :
     Strela_Op<mnemonic, traits>;
 
+// TODO: remove
 def BindingLoadOp : Strela_BindingOp<"binding_load", [Pure]> {
   let summary = "Reads a STRELA kernel operand from a dispatch binding";
   let description = [{
@@ -70,6 +58,7 @@ def BindingLoadOp : Strela_BindingOp<"binding_load", [Pure]> {
   let hasVerifier = 1;
 }
 
+// TODO(Diego): remove
 def BindingStoreOp : Strela_BindingOp<"binding_store"> {
   let summary = "Writes a STRELA kernel result to a dispatch binding";
   let description = [{
@@ -92,6 +81,18 @@ def BindingStoreOp : Strela_BindingOp<"binding_store"> {
   let assemblyFormat = [{
     $value `,` `binding` `(` $binding `)` (`offset_ordinal` $offset_ordinal^)?
     (`byte_offset` $byte_offset^)? attr-dict `:` type($value)
+  }];
+  let hasVerifier = 1;
+}
+
+def JobOp : Strela_Op<"job"> {
+  let arguments = (ins
+    DenseI32ArrayAttr:$bitstream,
+    TypedArrayAttrBase<Strela_InpColAttr, "input columns">:$inputs,
+    TypedArrayAttrBase<Strela_OutColAttr, "output columns">:$outputs
+  );
+  let assemblyFormat = [{
+    `bitstream` `(` $bitstream `)` `inputs` `(` $inputs `)` `outputs` `(` $outputs `)` attr-dict
   }];
   let hasVerifier = 1;
 }

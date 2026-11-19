@@ -60,12 +60,12 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:      "inputs": [{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 0,
-// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:     "base": {
 // CHECK-NEXT:       "value": 512,
-// CHECK:          "workgroup_x": {
+// CHECK:          "wg_x_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 0,
-// CHECK:          "workgroup_y": {
+// CHECK:          "wg_y_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 64,
 // CHECK:        "word_count": {
@@ -79,14 +79,14 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 0,
-// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:     "base": {
 // CHECK-NEXT:       "value": 0,
-// CHECK:          "workgroup_x": {
+// CHECK:          "wg_x_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 12,
 // CHECK:            "limit": {
 // CHECK-NEXT:         "value": 20,
-// CHECK:          "workgroup_y": {
+// CHECK:          "wg_y_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 0,
 // CHECK:        "word_count": {
@@ -96,12 +96,12 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 0,
-// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:     "base": {
 // CHECK-NEXT:       "value": 4,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 0,
-// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:     "base": {
 // CHECK-NEXT:       "value": 8,
 
 // Output column 0 is unused. Columns 1-3 each write one word, result[y, f0 + k]
@@ -113,14 +113,14 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 1,
-// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:     "base": {
 // CHECK-NEXT:       "value": 0,
-// CHECK:          "workgroup_x": {
+// CHECK:          "wg_x_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 12,
 // CHECK:            "limit": {
 // CHECK-NEXT:         "value": 20,
-// CHECK:          "workgroup_y": {
+// CHECK:          "wg_y_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 32,
 // CHECK:        "word_count": {
@@ -128,12 +128,12 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 1,
-// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:     "base": {
 // CHECK-NEXT:       "value": 4,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 1,
-// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:     "base": {
 // CHECK-NEXT:       "value": 8,
 
 // Two push constants, the low and high halves of N, which only the workgroup

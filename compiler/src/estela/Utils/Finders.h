@@ -16,9 +16,6 @@
 
 namespace mlir::estela {
 
-// The key of #strela.target_desc in the #hal.executable.target configuration.
-inline constexpr llvm::StringLiteral strelaTargetDescKey = "strela.target_desc";
-
 // The device target a !hal.device global is initialized with, or null.
 //
 // If you ever pass a device list (--iree-hal-target-device=x=[a,b]) the

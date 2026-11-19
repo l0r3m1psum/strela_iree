@@ -210,21 +210,28 @@ toValueDef(StrelaValue value) {
   return def;
 }
 
-static iree_hal_strela_AddressDef_ref_t
+static iree_hal_strela_ValueDef_t
+toValueDef(Attribute attr, uint32_t dflt) {
+  if (!attr) return {dflt, false};
+  if (auto pc = dyn_cast<strela::PushConstantAttr>(attr)) return {pc.getOrdinal(), true};
+  return {static_cast<uint32_t>(cast<IntegerAttr>(attr).getInt()), false};
+}
+
+static iree_hal_strela_ColumnAddressDef_ref_t
 createAddress(FlatbufferBuilder &builder, const StrelaColumn &column) {
-  iree_hal_strela_ValueDef_t offset = toValueDef(column.offset);
-  std::array<iree_hal_strela_WorkgroupTermDef_t, 3> terms{};
+  iree_hal_strela_ValueDef_t base = toValueDef(column.offset);
+  // The flatbuffer has no z term: z is always 1 workgroup.
+  std::array<iree_hal_strela_WorkgroupTermDef_t, 2> terms{};
   for (size_t d = 0; d < terms.size(); ++d) {
     terms[d].step = toValueDef(column.workgroup[d].step);
     terms[d].limit = toValueDef(column.workgroup[d].limit);
   }
-  iree_hal_strela_AddressDef_start(builder);
-  iree_hal_strela_AddressDef_binding_add(builder, column.binding);
-  iree_hal_strela_AddressDef_offset_add(builder, &offset);
-  iree_hal_strela_AddressDef_workgroup_x_add(builder, &terms[0]);
-  iree_hal_strela_AddressDef_workgroup_y_add(builder, &terms[1]);
-  iree_hal_strela_AddressDef_workgroup_z_add(builder, &terms[2]);
-  return iree_hal_strela_AddressDef_end(builder);
+  iree_hal_strela_ColumnAddressDef_start(builder);
+  iree_hal_strela_ColumnAddressDef_binding_add(builder, column.binding);
+  iree_hal_strela_ColumnAddressDef_base_add(builder, &base);
+  iree_hal_strela_ColumnAddressDef_wg_x_params_add(builder, &terms[0]);
+  iree_hal_strela_ColumnAddressDef_wg_y_params_add(builder, &terms[1]);
+  return iree_hal_strela_ColumnAddressDef_end(builder);
 }
 
 static flatbuffers_vec_ref_t
@@ -263,7 +270,7 @@ getStrelaExecutableTarget(MLIRContext *context, const EstelaOptions &options) {
   auto desc = strela::TargetDescAttr::get(
     context, options.rows, options.columns, options.maxColumnWords
   );
-  NamedAttribute config(b.getStringAttr(strelaTargetDescKey), desc);
+  NamedAttribute config(b.getStringAttr(strela::targetDescKey), desc);
   return b.getAttr<IREE::HAL::ExecutableTargetAttr>(
     b.getStringAttr("strela"), b.getStringAttr("strela_bitstream"),
     b.getDictionaryAttr(config)

@@ -52,16 +52,16 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // workgroup id, min(id * step, limit).
 //
 // The first column, row y of %x, is spelled out in full. It starts at byte 0
-// of binding 0 and moves one row of C words, 64 bytes, per y; x and z do not
+// of binding 0 and moves one row of C words, 64 bytes, per y; x does not
 // move it (step 0, no clamp: limit 2^32 - 1).
 // CHECK:            "inputs": [{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
-// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:             "base": {
 // CHECK-NEXT:               "value": 0,
 // CHECK-NEXT:               "is_constant": false
 // CHECK-NEXT:             },
-// CHECK-NEXT:             "workgroup_x": {
+// CHECK-NEXT:             "wg_x_params": {
 // CHECK-NEXT:               "step": {
 // CHECK-NEXT:                 "value": 0,
 // CHECK-NEXT:                 "is_constant": false
@@ -71,7 +71,7 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:                 "is_constant": false
 // CHECK-NEXT:               }
 // CHECK-NEXT:             },
-// CHECK-NEXT:             "workgroup_y": {
+// CHECK-NEXT:             "wg_y_params": {
 // CHECK-NEXT:               "step": {
 // CHECK-NEXT:                 "value": 64,
 // CHECK-NEXT:                 "is_constant": false
@@ -80,9 +80,9 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:                 "value": 4294967295,
 // CHECK-NEXT:                 "is_constant": false
 // CHECK-NEXT:               }
-// CHECK-NEXT:             },
-// CHECK-NEXT:             "workgroup_z": {
-// CHECK:                "word_count": {
+// CHECK-NEXT:             }
+// CHECK-NEXT:           },
+// CHECK-NEXT:           "word_count": {
 // CHECK-NEXT:             "value": 16,
 // CHECK-NEXT:             "is_constant": false
 // CHECK-NEXT:           },
@@ -98,7 +98,7 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:         },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
-// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:             "base": {
 // CHECK-NEXT:               "value": 128,
 // CHECK:                "word_count": {
 // CHECK-NEXT:             "value": 16,
@@ -109,12 +109,12 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK:              },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
-// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:             "base": {
 // CHECK-NEXT:               "value": 132,
 // CHECK:              },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
-// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:             "base": {
 // CHECK-NEXT:               "value": 136,
 
 // A word count of 0 leaves a column unused; its other fields are still
@@ -131,9 +131,9 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:         },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 1,
-// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:             "base": {
 // CHECK-NEXT:               "value": 0,
-// CHECK:                  "workgroup_y": {
+// CHECK:                  "wg_y_params": {
 // CHECK-NEXT:               "step": {
 // CHECK-NEXT:                 "value": 12,
 // CHECK:                "word_count": {

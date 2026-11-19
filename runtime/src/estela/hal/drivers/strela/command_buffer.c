@@ -271,7 +271,7 @@ iree_hal_strela_column_shift(const iree_hal_strela_column_t *column, const uint3
 // `word_stride` is NULL for outputs. Every workgroup count must be at least 1.
 static iree_status_t
 iree_hal_strela_column_resolve(
-  iree_hal_strela_AddressDef_table_t address,
+  iree_hal_strela_ColumnAddressDef_table_t address,
   iree_hal_strela_ValueDef_struct_t word_count,
   iree_hal_strela_ValueDef_struct_t word_stride,
   const uint32_t workgroup_count[3],
@@ -292,7 +292,7 @@ iree_hal_strela_column_resolve(
     return iree_ok_status();
   }
 
-  uint32_t binding = iree_hal_strela_AddressDef_binding_get(address);
+  uint32_t binding = iree_hal_strela_ColumnAddressDef_binding_get(address);
   if (binding >= bindings.count || !bindings.values[binding].buffer) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "binding %u is missing", binding);
   }
@@ -300,15 +300,18 @@ iree_hal_strela_column_resolve(
 
   uint32_t byte_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_strela_value_get(
-    iree_hal_strela_AddressDef_offset_get(address), constants, &byte_offset
+    iree_hal_strela_ColumnAddressDef_base_get(address), constants, &byte_offset
   ));
-  iree_hal_strela_WorkgroupTermDef_struct_t terms[3] = {
-    iree_hal_strela_AddressDef_workgroup_x_get(address),
-    iree_hal_strela_AddressDef_workgroup_y_get(address),
-    iree_hal_strela_AddressDef_workgroup_z_get(address),
+  // No z term: the z step stays 0 (from the memset), so z never moves a column.
+  iree_hal_strela_WorkgroupTermDef_struct_t terms[2] = {
+    iree_hal_strela_ColumnAddressDef_wg_x_params_get(address),
+    iree_hal_strela_ColumnAddressDef_wg_y_params_get(address),
   };
   uint32_t last_id[3];
   for (int d = 0; d < 3; ++d) {
+    last_id[d] = workgroup_count[d] - 1;
+  }
+  for (int d = 0; d < 2; ++d) {
     IREE_RETURN_IF_ERROR(iree_hal_strela_value_get(
       iree_hal_strela_WorkgroupTermDef_step_get(terms[d]), constants, &value
     ));
@@ -317,7 +320,6 @@ iree_hal_strela_column_resolve(
       iree_hal_strela_WorkgroupTermDef_limit_get(terms[d]), constants, &value
     ));
     out_column->limit[d] = value;
-    last_id[d] = workgroup_count[d] - 1;
   }
 
   // Every term grows with the id, so the last workgroup reaches farthest. The

@@ -1,3 +1,6 @@
+# TODO(Diego): This dialect is spread in too many files. It would be nice to
+# reduce this number.
+
 iree_tablegen_library(
   NAME
     StrelaOpsGen
@@ -32,6 +35,7 @@ iree_cc_library(
   DEPS
     ::StrelaOpsGen
     iree::..::..::compiler::src::estela::defs
+    iree::compiler::Dialect::HAL::IR
     MLIRIR
     MLIRSideEffectInterfaces
     MLIRSupport

@@ -56,7 +56,7 @@ findTargetDesc(IREE::HAL::ExecutableTargetAttr targetAttr) {
   if (!targetAttr || targetAttr.getBackend() != "strela") return {};
   DictionaryAttr config = targetAttr.getConfiguration();
   if (!config) return {};
-  return config.getAs<strela::TargetDescAttr>(strelaTargetDescKey);
+  return config.getAs<strela::TargetDescAttr>(strela::targetDescKey);
 }
 
 strela::TargetDescAttr

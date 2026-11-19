@@ -11,24 +11,25 @@ struct ValueDef { value:uint32; is_constant:bool; }
 struct WorkgroupTermDef { step:ValueDef; limit:ValueDef; }
 
 // Bytes from the start of the binding:
-//   offset + sum(min(d * step, limit) for d in {x,y,z})
-// d is the workgroup id along that dimension, known only at dispatch
-table AddressDef {
+//   base + sum(min(d * d_step, d_limit) for d in {x,y})
+// d is the workgroup id along that dimension, known only at dispatch.
+table ColumnAddressDef  {
   binding:uint32;
-  offset:ValueDef (required);
-  workgroup_x:WorkgroupTermDef (required);
-  workgroup_y:WorkgroupTermDef (required);
-  workgroup_z:WorkgroupTermDef (required);
+  base:ValueDef (required); // used when multiple tensors are in one binding
+  wg_x_params:WorkgroupTermDef (required);
+  wg_y_params:WorkgroupTermDef (required);
+  // wg_z is never used
 }
 
+// Give a base address in a binging
 table InputColumnDef  {
-  address:AddressDef (required);
+  address:ColumnAddressDef  (required);
   word_count:ValueDef (required);
   word_stride:ValueDef (required);
 }
 
 table OutputColumnDef {
-  address:AddressDef (required);
+  address:ColumnAddressDef  (required);
   word_count:ValueDef (required);
 }
 
