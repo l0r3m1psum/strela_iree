@@ -27,19 +27,30 @@
 // need no staging buffers, each operand keeps its own binding and every subspan
 // starts at byte zero.
 //
+// The job reads the row (C = 16 words) from binding 0, the weights (C words
+// F = 9 apart, 4 bytes between columns) from binding 1, and writes the result
+// to binding 2. Only the binding, offset and stride of each column are checked
+// here; materialize_bindings.mlir checks the rest.
+//
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
-// CHECK:     %[[X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
-// CHECK:     %[[W:.+]] = strela.binding_load binding(1) : tensor<16x9xi32>
-// CHECK:     %[[Y:.+]] = strela.matvec %[[X]], %[[W]] : tensor<8x16xi32>, tensor<16x9xi32> -> tensor<8x9xi32>
-// CHECK:     strela.binding_store %[[Y]], binding(2) : tensor<8x9xi32>
+// CHECK:     strela.job
+// CHECK-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32, delta = 0,{{[^#]*}}words = 16, stride = 1>,
+// CHECK-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32, delta = 0,{{[^#]*}}words = 16, stride = 9>,
+// CHECK-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32, delta = 4,{{[^#]*}}words = 16, stride = 9>,
+// CHECK-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32, delta = 8,{{[^#]*}}words = 16, stride = 9>])
+// CHECK-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
+// CHECK-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32, delta = 0,{{[^#]*}}words = 1>,
+// CHECK-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32, delta = 4,{{[^#]*}}words = 1>,
+// CHECK-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32, delta = 8,{{[^#]*}}words = 1>])
 
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
-// UNFUSED:     %[[U_X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
-// UNFUSED:     %[[U_W:.+]] = strela.binding_load binding(1) : tensor<16x9xi32>
-// UNFUSED:     %[[U_Y:.+]] = strela.matvec %[[U_X]], %[[U_W]]
-// UNFUSED:     strela.binding_store %[[U_Y]], binding(2) : tensor<8x9xi32>
+// UNFUSED:     strela.job
+// UNFUSED-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32
+// UNFUSED-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32
+// UNFUSED-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
+// UNFUSED-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32
 
 module attributes {
   stream.topology = #hal.device.topology<links = [
@@ -91,17 +102,21 @@ module attributes {
 //
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
-// CHECK:     %[[P_X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
-// CHECK:     %[[P_W:.+]] = strela.binding_load binding(0) byte_offset 512 : tensor<16x9xi32>
-// CHECK:     %[[P_Y:.+]] = strela.matvec %[[P_X]], %[[P_W]]
-// CHECK:     strela.binding_store %[[P_Y]], binding(1) : tensor<8x9xi32>
+// CHECK:     strela.job
+// CHECK-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32
+// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = 512 : i32, delta = 0,
+// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = 512 : i32, delta = 4,
+// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = 512 : i32, delta = 8,
+// CHECK-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
+// CHECK-SAME:           #strela.out_col<address = <binding = 1, offset = 0 : i32
 
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
-// UNFUSED:     %[[V_X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
-// UNFUSED:     %[[V_W:.+]] = strela.binding_load binding(1) : tensor<16x9xi32>
-// UNFUSED:     %[[V_Y:.+]] = strela.matvec %[[V_X]], %[[V_W]]
-// UNFUSED:     strela.binding_store %[[V_Y]], binding(2) : tensor<8x9xi32>
+// UNFUSED:     strela.job
+// UNFUSED-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32
+// UNFUSED-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32
+// UNFUSED-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
+// UNFUSED-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32
 
 module {
   func.func @main(
@@ -141,22 +156,31 @@ module {
 // Variant 3: TransferWrapPass places both matvecs on device_b and they share
 // one executable. FuseDispatchBindings packs the operands of the two dispatch
 // sites at different offsets, so the offsets reach the kernel as push
-// constants. Each is a single i32 constant because Stream proved it fits in 32
-// bits.
+// constants, each a single i32 because Stream proved it fits in 32 bits. Each
+// column adds its own compile-time delta to the push constant offset of its
+// tensor: 4k bytes for weight and result column k.
 //
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
-// CHECK:     %[[S_X:.+]] = strela.binding_load binding(0) offset_ordinal {{[0-9]+}} : tensor<8x16xi32>
-// CHECK:     %[[S_W:.+]] = strela.binding_load binding(0) offset_ordinal {{[0-9]+}} : tensor<16x9xi32>
-// CHECK:     %[[S_Y:.+]] = strela.matvec %[[S_X]], %[[S_W]]
-// CHECK:     strela.binding_store %[[S_Y]], binding(1) offset_ordinal {{[0-9]+}} : tensor<8x9xi32>
+// CHECK:     strela.job
+// CHECK-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = #strela.push_constant<0>, delta = 0,
+// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = #strela.push_constant<1>, delta = 0,
+// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = #strela.push_constant<1>, delta = 4,
+// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = #strela.push_constant<1>, delta = 8,
+// CHECK-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
+// CHECK-SAME:           #strela.out_col<address = <binding = 1, offset = #strela.push_constant<2>, delta = 0,
+// CHECK-SAME:           #strela.out_col<address = <binding = 1, offset = #strela.push_constant<2>, delta = 4,
+// CHECK-SAME:           #strela.out_col<address = <binding = 1, offset = #strela.push_constant<2>, delta = 8,
 
+// Without fused bindings every operand has a binding of its own at byte 0.
+//
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
-// UNFUSED:     %[[W_X:.+]] = strela.binding_load binding(0) : tensor<8x16xi32>
-// UNFUSED:     %[[W_W:.+]] = strela.binding_load binding(1) : tensor<16x9xi32>
-// UNFUSED:     %[[W_Y:.+]] = strela.matvec %[[W_X]], %[[W_W]]
-// UNFUSED:     strela.binding_store %[[W_Y]], binding(2) : tensor<8x9xi32>
+// UNFUSED:     strela.job
+// UNFUSED-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32
+// UNFUSED-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32
+// UNFUSED-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
+// UNFUSED-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32
 
 module {
   func.func @main(

@@ -44,11 +44,14 @@ def ConvertLinalgToStrelaPass
 def MaterializeBindingsPass
     : Pass<"iree-strela-materialize-bindings", "mlir::func::FuncOp"> {
   let summary =
-      "Replaces the STRELA dispatch interface with strela.binding_load/store";
+      "Replaces the STRELA dispatch interface and kernel with a strela.job";
   let description = [{
-    Rewrites the dispatch interface into strela.binding_load and
-    strela.binding_store, deleting the hal.interface.* ops and the arithmetic
-    that reassembled the byte offsets from the push constants.
+    Replaces the strela.matvec of a dispatch, the loads and store around it and
+    the hal.interface.* ops they read with one strela.job: the matvec bitstream
+    and its DMA columns, each column address stated as a binding, a byte offset
+    (immediate or push constant) and the workgroup terms of the grid
+    ResolveWorkgroupCountPass set. Deletes the arithmetic that reassembled the
+    byte offsets from the push constants.
   }];
   let dependentDialects = ["mlir::strela::StrelaDialect"];
 }

@@ -60,8 +60,11 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:      "inputs": [{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 0,
-// CHECK-NEXT:     "base": {
+// CHECK-NEXT:     "offset": {
 // CHECK-NEXT:       "value": 512,
+// CHECK-NEXT:       "is_constant": false
+// CHECK-NEXT:     },
+// CHECK-NEXT:     "delta": 0,
 // CHECK:          "wg_x_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 0,
@@ -74,13 +77,16 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK-NEXT:     "value": 1,
 
 // Columns 1-3 read columns f0, f0 + 1 and f0 + 2 of %w: C words, one every
-// F = 8, starting 0, 4 and 8 bytes in. Each x moves them 3 features, 12 bytes,
+// F = 8, at deltas 0, 4 and 8 bytes into %w. Each x moves them 3 features, 12 bytes,
 // up to the clamp of 4(F - 3) = 20 bytes; y does not move them.
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 0,
-// CHECK-NEXT:     "base": {
+// CHECK-NEXT:     "offset": {
 // CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "is_constant": false
+// CHECK-NEXT:     },
+// CHECK-NEXT:     "delta": 0,
 // CHECK:          "wg_x_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 12,
@@ -96,13 +102,19 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 0,
-// CHECK-NEXT:     "base": {
-// CHECK-NEXT:       "value": 4,
+// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "is_constant": false
+// CHECK-NEXT:     },
+// CHECK-NEXT:     "delta": 4,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 0,
-// CHECK-NEXT:     "base": {
-// CHECK-NEXT:       "value": 8,
+// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "is_constant": false
+// CHECK-NEXT:     },
+// CHECK-NEXT:     "delta": 8,
 
 // Output column 0 is unused. Columns 1-3 each write one word, result[y, f0 + k]
 // in binding 1: 12 bytes per x with the same clamp, a row of 4F = 32 bytes
@@ -113,8 +125,11 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 1,
-// CHECK-NEXT:     "base": {
+// CHECK-NEXT:     "offset": {
 // CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "is_constant": false
+// CHECK-NEXT:     },
+// CHECK-NEXT:     "delta": 0,
 // CHECK:          "wg_x_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 12,
@@ -128,13 +143,19 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 1,
-// CHECK-NEXT:     "base": {
-// CHECK-NEXT:       "value": 4,
+// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "is_constant": false
+// CHECK-NEXT:     },
+// CHECK-NEXT:     "delta": 4,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 1,
-// CHECK-NEXT:     "base": {
-// CHECK-NEXT:       "value": 8,
+// CHECK-NEXT:     "offset": {
+// CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "is_constant": false
+// CHECK-NEXT:     },
+// CHECK-NEXT:     "delta": 8,
 
 // Two push constants, the low and high halves of N, which only the workgroup
 // count uses; no column needs one.

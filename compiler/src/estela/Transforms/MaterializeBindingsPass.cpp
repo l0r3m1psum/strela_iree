@@ -14,6 +14,8 @@
 
 #include "estela/StrelaIR/StrelaDialect.h"
 #include "estela/StrelaIR/StrelaOps.h"
+#include "estela/Utils/Bitstreams.h"
+#include "estela/Utils/Finders.h"
 
 namespace mlir::estela {
 #define GEN_PASS_DEF_MATERIALIZEBINDINGSPASS
@@ -32,8 +34,8 @@ namespace {
 // The HAL hands a dispatch to the driver as (workgroup count, push constants,
 // bindings). Nothing about which binding is which kernel argument survives into
 // the binary unless we put it there, so these helpers read it back out of the
-// executable source and MaterializeBindingsPass restates it as
-// strela.binding_load / strela.binding_store.
+// executable source and MaterializeBindingsPass restates it as the columns of a
+// strela.job.
 
 // The push constant holding an offset that is only known at dispatch time.
 struct PushConstant {
@@ -144,11 +146,9 @@ matchBinding(Operation *op, Value dispatchTensor) {
 }
 
 struct StrelaEntryPointInfo {
-  // The strela.* op itself, and the load/store ops each argument came from.
-  // MaterializeBindingsPass uses their locations so a binding that cannot
-  // be resolved is reported against the op it came from.
+  // The strela.* op itself and the store of its result, which
+  // MaterializeBindingsPass replaces with the job.
   Operation *kernelOp = nullptr;
-  SmallVector<Operation *> operandOps;
   Operation *resultOp = nullptr;
   SmallVector<StrelaBinding> operands;
   StrelaBinding result;
@@ -208,7 +208,6 @@ analyzeEntryPoint(func::FuncOp funcOp) {
     FailureOr<StrelaBinding> binding = matchBinding(loadOp, loadOp.getSource());
     if (failed(binding)) return failure();
     info.operands.push_back(*binding);
-    info.operandOps.push_back(loadOp);
   }
 
   // The result must go straight back out to a binding.
@@ -236,9 +235,137 @@ analyzeEntryPoint(func::FuncOp funcOp) {
   return info;
 }
 
-// Rewrites the dispatch interface of a STRELA kernel into strela.binding_load /
-// strela.binding_store, deleting the `hal.interface.*` ops, the push constant
-// loads and the arithmetic that reassembled the byte offsets from them.
+//===--------------------------------------------------------------------===//
+// The matvec job
+//===--------------------------------------------------------------------===//
+
+using estela::matvecBitstream;
+using estela::strelaKernelColumns;
+using estela::strelaKernelRows;
+using estela::strelaMatvecFeaturesPerJob;
+
+// Builds the column attributes of one job.
+class ColumnBuilder {
+public:
+  explicit ColumnBuilder(MLIRContext *context) : context(context) {}
+
+  // min(wg_d * step, limit) bytes; this default moves nothing.
+  strela::WgAxisParamsAttr
+  axis(uint32_t step = 0, uint32_t limit = UINT32_MAX) const {
+    return strela::WgAxisParamsAttr::get(context, step, limit);
+  }
+
+  // The address of the column `delta` bytes into the tensor of `binding`, for
+  // workgroup (0, 0), plus the two axis terms.
+  strela::ColAddrAttr
+  address(
+    const StrelaBinding &binding, uint32_t delta,
+    strela::WgAxisParamsAttr x, strela::WgAxisParamsAttr y
+  ) const {
+    Attribute offset;
+    if (auto *constant = std::get_if<PushConstant>(&binding.offset)) {
+      offset = strela::PushConstantAttr::get(context, constant->ordinal);
+    } else {
+      offset = IntegerAttr::get(
+        IntegerType::get(context, 32), std::get<uint32_t>(binding.offset)
+      );
+    }
+    return strela::ColAddrAttr::get(
+      context, binding.binding, offset, delta, x, y
+    );
+  }
+
+  // A column that moves no words.
+  strela::OutColAttr
+  unusedOutput() const {
+    auto offset = IntegerAttr::get(IntegerType::get(context, 32), 0);
+    auto addr = strela::ColAddrAttr::get(context, 0, offset, 0, axis(), axis());
+    return strela::OutColAttr::get(context, addr, 0);
+  }
+
+private:
+  MLIRContext *context;
+};
+
+// result[n, f] = sum_c lhs[n, c] * rhs[c, f], one job per workgroup (x, y) of
+// the (ceildiv(F, 3), N, 1) grid ResolveWorkgroupCountPass sets. The job
+// computes the features f0 .. f0 + 2, f0 = min(3x, F - 3), of row n = y: the row
+// enters input column 0, the rhs columns f0 .. f0 + 2 (stride F) enter input
+// columns 1-3, and their dot products with the row leave by output columns
+// 1-3. The last job overlaps the one before it when 3 does not divide F,
+// rewriting the same values.
+static FailureOr<strela::JobOp>
+buildMatvecJob(
+  OpBuilder &builder,
+  const StrelaEntryPointInfo &info,
+  strela::TargetDescAttr desc
+) {
+  auto matvecOp = cast<strela::MatvecOp>(info.kernelOp);
+  if (!desc) {
+    return matvecOp.emitOpError("has no STRELA target description in scope");
+  }
+  if (desc.getRows() != strelaKernelRows ||
+      desc.getColumns() != strelaKernelColumns) {
+    return matvecOp.emitOpError("the hand-written STRELA kernels need a ")
+           << strelaKernelRows << "x" << strelaKernelColumns << " fabric, got "
+           << desc.getRows() << "x" << desc.getColumns()
+           << "; other fabrics need the mapper";
+  }
+  auto rhsType = cast<RankedTensorType>(matvecOp.getRhs().getType());
+  if (!rhsType.hasStaticShape()) {
+    return matvecOp.emitOpError("needs a static rhs, got ") << rhsType;
+  }
+  int64_t c = rhsType.getDimSize(0);
+  int64_t f = rhsType.getDimSize(1);
+  if (f < strelaMatvecFeaturesPerJob) {
+    return matvecOp.emitOpError("needs F of at least ")
+           << strelaMatvecFeaturesPerJob << ", got " << f;
+  }
+
+  if (c * f > desc.getMaxColumnWords()) {
+    return matvecOp.emitOpError("needs C * F of at most ")
+           << desc.getMaxColumnWords() << " words, the span a strided STRELA "
+           << "column can cover, got " << c << " * " << f;
+  }
+
+  MLIRContext *context = builder.getContext();
+  ColumnBuilder columns(context);
+  constexpr int64_t word = sizeof(uint32_t);
+  // Each x workgroup moves 3 features further, clamped so the last job ends at F.
+  strela::WgAxisParamsAttr features = columns.axis(
+    word * strelaMatvecFeaturesPerJob, word * (f - strelaMatvecFeaturesPerJob)
+  );
+
+  SmallVector<Attribute> inputs, outputs;
+  strela::ColAddrAttr row = columns.address(
+    info.operands[0], 0, columns.axis(), columns.axis(word * c)
+  );
+  inputs.push_back(strela::InpColAttr::get(context, row, c, 1));
+  outputs.push_back(columns.unusedOutput());
+
+  for (int64_t k = 0; k < strelaMatvecFeaturesPerJob; ++k) {
+    strela::ColAddrAttr weights = columns.address(
+      info.operands[1], word * k, features, columns.axis()
+    );
+    inputs.push_back(strela::InpColAttr::get(context, weights, c, f));
+
+    strela::ColAddrAttr result = columns.address(
+      info.result, word * k, features, columns.axis(word * f)
+    );
+    outputs.push_back(strela::OutColAttr::get(context, result, 1));
+  }
+
+  auto bitstream = matvecBitstream(static_cast<uint16_t>(c));
+  SmallVector<int32_t> words(bitstream.begin(), bitstream.end());
+  return strela::JobOp::create(
+    builder, info.resultOp->getLoc(), builder.getDenseI32ArrayAttr(words),
+    builder.getArrayAttr(inputs), builder.getArrayAttr(outputs)
+  );
+}
+
+// Replaces the dispatch interface of a STRELA kernel and the kernel itself with
+// one strela.job, deleting the `hal.interface.*` ops, the push constant loads
+// and the arithmetic that reassembled the byte offsets from them.
 struct MaterializeBindingsPass final
     : estela::impl::MaterializeBindingsPassBase<MaterializeBindingsPass> {
   void runOnOperation() override {
@@ -247,38 +374,13 @@ struct MaterializeBindingsPass final
     FailureOr<StrelaEntryPointInfo> info = analyzeEntryPoint(funcOp);
     if (failed(info)) return signalPassFailure();
 
-    OpBuilder builder(info->kernelOp);
-    // The (offset_ordinal, byte_offset) attributes of a binding op. A zero byte
-    // offset is written by omitting the attribute.
-    auto offsetAttrsOf = [&builder](const StrelaBinding &binding)
-      -> std::pair<IntegerAttr, IntegerAttr> {
-      if (auto *constant = std::get_if<PushConstant>(&binding.offset)) {
-        return {builder.getI64IntegerAttr(constant->ordinal), IntegerAttr()};
-      }
-      uint32_t bytes = std::get<uint32_t>(binding.offset);
-      return {IntegerAttr(), bytes ? builder.getI64IntegerAttr(bytes) : IntegerAttr()};
-    };
-
-    // Operands: the load takes over from subspan + dispatch.tensor.load, and
-    // keeps that load's location so diagnostics still point at the original.
-    for (auto [index, binding] : llvm::enumerate(info->operands)) {
-      Operation *loadOp = info->operandOps[index];
-      auto [ordinalAttr, byteOffsetAttr] = offsetAttrsOf(binding);
-      auto bindingLoadOp = strela::BindingLoadOp::create(
-        builder, loadOp->getLoc(), loadOp->getResult(0).getType(),
-        static_cast<int64_t>(binding.binding), ordinalAttr, byteOffsetAttr
-      );
-      info->kernelOp->setOperand(index, bindingLoadOp.getResult());
+    OpBuilder builder(info->resultOp);
+    strela::TargetDescAttr desc = estela::findStrelaTargetDesc(funcOp);
+    if (failed(buildMatvecJob(builder, *info, desc))) {
+      return signalPassFailure();
     }
-
-    // Result: the store takes over from dispatch.tensor.store.
-    builder.setInsertionPointAfter(info->kernelOp);
-    auto [ordinalAttr, byteOffsetAttr] = offsetAttrsOf(info->result);
-    strela::BindingStoreOp::create(
-      builder, info->resultOp->getLoc(), info->kernelOp->getResult(0),
-      static_cast<int64_t>(info->result.binding), ordinalAttr, byteOffsetAttr
-    );
     info->resultOp->erase();
+    info->kernelOp->erase();
 
     // Everything that fed the old interface is now unused. Erase in reverse so
     // consumers go before their producers.

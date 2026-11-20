@@ -77,7 +77,7 @@ iree_hal_strela_column_verify(
     IREE_RETURN_IF_ERROR(iree_hal_strela_value_verify(word_stride, constant_count));
   }
   IREE_RETURN_IF_ERROR(iree_hal_strela_value_verify(
-    iree_hal_strela_ColumnAddressDef_base_get(address), constant_count
+    iree_hal_strela_ColumnAddressDef_offset_get(address), constant_count
   ));
   IREE_RETURN_IF_ERROR(iree_hal_strela_term_verify(
     iree_hal_strela_ColumnAddressDef_wg_x_params_get(address), constant_count

@@ -18,7 +18,7 @@ StrelaDialect::registerAttributes() {
 LogicalResult
 ColAddrAttr::verify(
   function_ref<InFlightDiagnostic()> emitError, uint32_t binding,
-  Attribute offset, WgAxisParamsAttr wgXParams, WgAxisParamsAttr wgYParams
+  Attribute offset, uint32_t delta, WgAxisParamsAttr wgXParams, WgAxisParamsAttr wgYParams
 ) {
   auto intAttr = dyn_cast<IntegerAttr>(offset);
   if (!isa<PushConstantAttr>(offset) &&

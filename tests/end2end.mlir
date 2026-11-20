@@ -161,9 +161,12 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // stream.executable are converted to hal.executable via
 // executable-{sources,configurations,targets}. The STRELA backend sets the
 // workgroup count, (ceildiv(F, 3), N, 1) = (3, N, 1), one job per row and
-// triple of features, and restates the dispatch interface as
-// strela.binding_load/store. With --iree-stream-resource-index-bits=32 N is a
-// single push constant, which only the count uses.
+// triple of features, and replaces the matvec and the dispatch interface with a
+// strela.job: the bitstream and the 4 input and 4 output DMA columns. With
+// --iree-stream-resource-index-bits=32 N is a single push constant, which only
+// the count uses. Here the row is at byte 576 of binding 0 (input column 0),
+// the weights at its start (input columns 1-3, 4 bytes apart, C = 16 words F = 9
+// apart), and the result in binding 1 (output column 0 unused, 1-3 used).
 
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable private @{{.+}} {
@@ -173,10 +176,16 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // EXC:               hal.return %[[C3]], %[[N]], %{{.+}} : index, index, index
 // EXC:             builtin.module {
 // EXC:               func.func @{{.+}}() {
-// EXC:                 %[[X:.+]] = strela.binding_load binding(0) byte_offset 576 : tensor<?x16xi32>
-// EXC:                 %[[W:.+]] = strela.binding_load binding(0) : tensor<16x9xi32>
-// EXC:                 %[[Y:.+]] = strela.matvec %[[X]], %[[W]] : tensor<?x16xi32>, tensor<16x9xi32> -> tensor<?x9xi32>
-// EXC:                 strela.binding_store %[[Y]], binding(1) : tensor<?x9xi32>
+// EXC-NEXT:              strela.job
+// EXC-SAME:                inputs([#strela.inp_col<address = <binding = 0, offset = 576 : i32, delta = 0,{{[^#]*}}words = 16, stride = 1>,
+// EXC-SAME:                        #strela.inp_col<address = <binding = 0, offset = 0 : i32, delta = 0,{{[^#]*}}words = 16, stride = 9>,
+// EXC-SAME:                        #strela.inp_col<address = <binding = 0, offset = 0 : i32, delta = 4,{{[^#]*}}words = 16, stride = 9>,
+// EXC-SAME:                        #strela.inp_col<address = <binding = 0, offset = 0 : i32, delta = 8,{{[^#]*}}words = 16, stride = 9>])
+// EXC-SAME:                outputs([#strela.out_col<{{[^#]*}}words = 0>,
+// EXC-SAME:                         #strela.out_col<address = <binding = 1, offset = 0 : i32, delta = 0,{{[^#]*}}words = 1>,
+// EXC-SAME:                         #strela.out_col<address = <binding = 1, offset = 0 : i32, delta = 4,{{[^#]*}}words = 1>,
+// EXC-SAME:                         #strela.out_col<address = <binding = 1, offset = 0 : i32, delta = 8,{{[^#]*}}words = 1>])
+// EXC-NEXT:              return
 
 // Finally compilation should conclude without problems...
 
@@ -284,7 +293,9 @@ func.func @matvec_relu(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable private @{{.+}} {
 // EXC:           hal.executable.variant public @strela_bitstream
-// EXC:                 %{{.+}} = strela.matvec %{{.+}}, %{{.+}} : tensor<?x16xi32>, tensor<16x9xi32> -> tensor<?x9xi32>
+// EXC:                 strela.job
+// EXC-SAME:              inputs([#strela.inp_col<{{[^#]*}}words = 16, stride = 1>,
+// EXC-SAME:                      #strela.inp_col<{{[^#]*}}words = 16, stride = 9>,
 // EXC:         hal.executable private @{{.+}} {
 // EXC:           hal.executable.variant public @vmvx_bytecode_fb
 
@@ -332,9 +343,9 @@ func.func @matvec_const_weights(%x: tensor<1x1x16xi32>) -> tensor<1x1x3xi32> {
 
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable.export public @{{.+}} layout(#hal.pipeline.layout<bindings = [{{.+}}, #hal.pipeline.binding<storage_buffer, ReadOnly>, {{.+}}]
-// EXC:                 %[[X:.+]] = strela.binding_load binding(0) : tensor<1x16xi32>
-// EXC:                 %[[W:.+]] = strela.binding_load binding(1) : tensor<16x3xi32>
-// EXC:                 %{{.+}} = strela.matvec %[[X]], %[[W]] : tensor<1x16xi32>, tensor<16x3xi32> -> tensor<1x3xi32>
+// EXC:                 strela.job
+// EXC-SAME:              inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32{{[^#]*}}words = 16, stride = 1>,
+// EXC-SAME:                      #strela.inp_col<address = <binding = 1, offset = 0 : i32{{[^#]*}}words = 16, stride = 3>,
 
 // -----
 
@@ -417,4 +428,4 @@ func.func @matmul_bias(%act: tensor<?x64xi32>, %wgt: tensor<128x64xi32>) -> (ten
 // FLW:         util.global private @{{.+}}
 
 // EXC-LABEL: module attributes {stream.affinity.default
-// EXC:               %{{.+}} = strela.matvec %{{.+}}, %{{.+}} :
+// EXC:               strela.job

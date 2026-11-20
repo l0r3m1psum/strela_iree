@@ -298,10 +298,12 @@ iree_hal_strela_column_resolve(
   }
   iree_hal_buffer_ref_t ref = bindings.values[binding];
 
-  uint32_t byte_offset = 0;
+  // Where the tensor starts in the binding plus where the column starts in it.
   IREE_RETURN_IF_ERROR(iree_hal_strela_value_get(
-    iree_hal_strela_ColumnAddressDef_base_get(address), constants, &byte_offset
+    iree_hal_strela_ColumnAddressDef_offset_get(address), constants, &value
   ));
+  uint64_t byte_offset =
+    (uint64_t)value + iree_hal_strela_ColumnAddressDef_delta_get(address);
   // No z term: the z step stays 0 (from the memset), so z never moves a column.
   iree_hal_strela_WorkgroupTermDef_struct_t terms[2] = {
     iree_hal_strela_ColumnAddressDef_wg_x_params_get(address),

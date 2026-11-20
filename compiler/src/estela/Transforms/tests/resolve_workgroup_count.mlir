@@ -130,8 +130,10 @@ hal.executable private @matvec_dynamic {
 
 // -----
 
-// After MaterializeBindings the link from N to the workload is gone, so the
-// pass refuses to guess rather than launching the wrong number of jobs.
+// N must come from a dispatch tensor load, whose dynamic size is a workload
+// ordinal. Here it doesn't (as after MaterializeBindings, which erases the
+// loads), so the pass refuses to guess rather than launch the wrong number of
+// jobs.
 
 #layout = #hal.pipeline.layout<constants = 1, bindings = [
   #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
@@ -146,13 +148,12 @@ hal.executable private @matvec_materialized {
       hal.return %x, %y, %z : index, index, index
     }
     builtin.module {
-      func.func @matvec_materialized() {
-        %0 = strela.binding_load binding(0) : tensor<?x16xi32>
-        %1 = strela.binding_load binding(1) : tensor<16x9xi32>
+      func.func @matvec_materialized(%n: index) -> tensor<?x9xi32> {
+        %0 = tensor.empty(%n) : tensor<?x16xi32>
+        %1 = arith.constant dense<1> : tensor<16x9xi32>
         // expected-error @+1 {{lhs is not a dispatch tensor load}}
         %2 = strela.matvec %0, %1 : tensor<?x16xi32>, tensor<16x9xi32> -> tensor<?x9xi32>
-        strela.binding_store %2, binding(2) : tensor<?x9xi32>
-        return
+        return %2 : tensor<?x9xi32>
       }
     }
   }

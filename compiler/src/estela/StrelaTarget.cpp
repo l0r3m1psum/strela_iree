@@ -1,7 +1,5 @@
 #include "estela/StrelaTarget.h"
 
-#include <array>
-
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 #include "iree/compiler/Dialect/Stream/IR/StreamTypes.h"
 #include "iree/compiler/Utils/FlatbufferUtils.h"
@@ -15,7 +13,6 @@
 #include "estela/StrelaIR/StrelaOps.h"
 #include "estela/StrelaIR/StrelaAttrs.h"
 #include "estela/Transforms/Passes.h"
-#include "estela/Utils/Bitstreams.h"
 #include "estela/Utils/Finders.h"
 
 #include "strela_executable_def_builder.h"
@@ -24,223 +21,57 @@ using namespace mlir::iree_compiler;
 
 namespace mlir::estela {
 
-// A ValueDef before it is written out: an immediate, or the ordinal of the push
-// constant holding the value.
-struct StrelaValue {
-  uint32_t value = 0;
-  bool isConstant = false;
-};
-
-static StrelaValue
-immediate(int64_t value) {
-  return {static_cast<uint32_t>(value), false};
+// The single strela.job of an export. Everything the flatbuffer needs is in it.
+static FailureOr<strela::JobOp>
+getJob(func::FuncOp funcOp) {
+  SmallVector<strela::JobOp> jobOps(funcOp.getOps<strela::JobOp>());
+  if (jobOps.size() != 1) {
+    return funcOp.emitOpError("expected exactly one strela.job, found ")
+           << jobOps.size();
+  }
+  return jobOps.front();
 }
 
-// min(workgroup_id[d] * step, limit) bytes; the default adds nothing.
-struct StrelaTerm {
-  StrelaValue step;
-  StrelaValue limit{UINT32_MAX, false};
-};
-
-// The DMA programme of one CGRA column, before it is written out. A word count
-// of 0 leaves the column unused; outputs have no word stride.
-struct StrelaColumn {
-  uint32_t binding = 0;
-  StrelaValue offset;
-  std::array<StrelaTerm, 3> workgroup;
-  StrelaValue wordCount;
-  StrelaValue wordStride{1, false};
-};
-
-// Where a binding op reads or writes, for workgroup (0, 0, 0).
-template <typename BindingOp> static StrelaColumn
-getColumn(BindingOp op) {
-  StrelaColumn column;
-  column.binding = static_cast<uint32_t>(op.getBinding());
-  if (std::optional<uint64_t> ordinal = op.getOffsetOrdinal()) {
-    column.offset = {static_cast<uint32_t>(*ordinal), true};
-  } else {
-    column.offset = immediate(op.getByteOffset().value_or(0));
-  }
-  return column;
-}
-
-// `column` moved `bytes` further into its binding, which only an offset known
-// at compile time can be.
-static FailureOr<StrelaColumn>
-offsetColumn(Operation *op, StrelaColumn column, int64_t bytes) {
-  if (bytes == 0) return column;
-  if (column.offset.isConstant) {
-    return op->emitOpError(
-      "needs a byte offset known at compile time; retry with "
-      "--iree-scheduling-optimize-bindings=false"
-    );
-  }
-  int64_t offset = column.offset.value + bytes;
-  if (offset > UINT32_MAX) {
-    return op->emitOpError("byte offset does not fit in 32 bits");
-  }
-  column.offset = immediate(offset);
-  return column;
-}
-
-// The single STRELA operation of an export and the columns it uses.
-struct StrelaExport {
-  explicit StrelaExport(unsigned words, unsigned columns)
-    : bitstream(words), inputs(columns), outputs(columns) {}
-  SmallVector<uint32_t> bitstream;
-  SmallVector<StrelaColumn> inputs;
-  SmallVector<StrelaColumn> outputs;
-};
-
-// result[0, n, f] = sum_c lhs[0, n, c] * rhs[0, c, f], one job per workgroup
-// (x, y) of the (ceildiv(F, 3), N, 1) grid. The job computes the features
-// f0 .. f0 + 2, f0 = min(3x, F - 3), of row n = y: the row enters column 0, the
-// rhs columns f0 .. f0 + 2 (stride F) enter columns 1-3, and their dot products
-// with the row leave by output columns 1-3. The last job overlaps the one
-// before it when 3 does not divide F, rewriting the same values.
-static FailureOr<StrelaExport>
-getMatvecExport(
-  strela::MatvecOp matvecOp,
-  strela::BindingLoadOp lhsOp,
-  strela::BindingLoadOp rhsOp,
-  strela::BindingStoreOp resultOp,
-  strela::TargetDescAttr targetDesc
-) {
-  auto rhsType = cast<RankedTensorType>(matvecOp.getRhs().getType());
-  if (!rhsType.hasStaticShape()) {
-    return matvecOp.emitOpError("needs a static rhs, got ") << rhsType;
-  }
-  int64_t c = rhsType.getDimSize(0);
-  int64_t f = rhsType.getDimSize(1);
-  if (f < strelaMatvecFeaturesPerJob) {
-    return matvecOp.emitOpError("needs F of at least ")
-           << strelaMatvecFeaturesPerJob << ", got " << f;
-  }
-  // A weight column reads C words F apart, and the input size register holds
-  // that whole span, C * F words, as a 16 bit byte count (DESIGN.md H8).
-  if (c * f > targetDesc.getMaxColumnWords()) {
-    return matvecOp.emitOpError("needs C * F of at most ")
-           << targetDesc.getMaxColumnWords() << " words, the span a strided STRELA "
-           << "column can cover, got " << c << " * " << f;
-  }
-
-  constexpr int64_t word = sizeof(uint32_t);
-  StrelaTerm featureTerm{
-    immediate(word * strelaMatvecFeaturesPerJob),
-    immediate(word * (f - strelaMatvecFeaturesPerJob)),
-  };
-
-  StrelaExport result(strelaBitstreamWords, strelaKernelColumns);
-  auto bitstream = matvecBitstream(static_cast<uint16_t>(c));
-  result.bitstream.assign(bitstream.begin(), bitstream.end());
-
-  StrelaColumn row = getColumn(lhsOp);
-  row.wordCount = immediate(c);
-  row.workgroup[1].step = immediate(word * c);
-  result.inputs[0] = row;
-
-  for (int64_t k = 0; k < strelaMatvecFeaturesPerJob; ++k) {
-    FailureOr<StrelaColumn> weights = offsetColumn(rhsOp, getColumn(rhsOp), word * k);
-    if (failed(weights)) return failure();
-    weights->wordCount = immediate(c);
-    weights->wordStride = immediate(f);
-    weights->workgroup[0] = featureTerm;
-    result.inputs[1 + k] = *weights;
-
-    FailureOr<StrelaColumn> feature =
-      offsetColumn(resultOp, getColumn(resultOp), word * k);
-    if (failed(feature)) return failure();
-    feature->wordCount = immediate(1);
-    feature->workgroup[0] = featureTerm;
-    feature->workgroup[1].step = immediate(word * f);
-    result.outputs[1 + k] = *feature;
-  }
-  return result;
-}
-
-static FailureOr<StrelaExport>
-getExport(func::FuncOp funcOp, strela::TargetDescAttr targetDesc) {
-  if (targetDesc.getRows() != strelaKernelRows
-      || targetDesc.getColumns() != strelaKernelColumns) {
-    return funcOp.emitOpError("the hand-written STRELA kernels need a ")
-      << strelaKernelRows << "x" << strelaKernelColumns
-      << " fabric, got " << targetDesc.getRows() << "x" << targetDesc.getColumns()
-      << "; other fabrics need the mapper";
-  }
-  SmallVector<Operation *> kernelOps;
-  funcOp.walk([&kernelOps](Operation *op) {
-    if (isa<strela::MatvecOp>(op)) {
-      kernelOps.push_back(op);
-    }
-  });
-  if (kernelOps.size() != 1) {
-    return funcOp.emitOpError("expected exactly one STRELA operation, found ")
-           << kernelOps.size();
-  }
-  Operation *kernelOp = kernelOps.front();
-
-  SmallVector<strela::BindingLoadOp> loadOps;
-  for (auto [i, operand] : llvm::enumerate(kernelOp->getOperands())) {
-    auto loadOp = operand.getDefiningOp<strela::BindingLoadOp>();
-    if (!loadOp) {
-      return kernelOp->emitOpError("operand ") << i
-             << " is not read straight from a binding";
-    }
-    loadOps.push_back(loadOp);
-  }
-  Value value = kernelOp->getResult(0);
-  if (!value.hasOneUse()) {
-    return kernelOp->emitOpError("result must be stored to exactly one binding");
-  }
-  auto storeOp = dyn_cast<strela::BindingStoreOp>(*value.getUsers().begin());
-  if (!storeOp) {
-    return kernelOp->emitOpError("result is not stored straight to a binding");
-  }
-
-  auto matvecOp = cast<strela::MatvecOp>(kernelOp);
-  return getMatvecExport(matvecOp, loadOps[0], loadOps[1], storeOp, targetDesc);
-}
-
+// An immediate, or the ordinal of the push constant holding the value.
 static iree_hal_strela_ValueDef_t
-toValueDef(StrelaValue value) {
-  iree_hal_strela_ValueDef_t def{};
-  def.value = value.value;
-  def.is_constant = value.isConstant;
-  return def;
-}
-
-static iree_hal_strela_ValueDef_t
-toValueDef(Attribute attr, uint32_t dflt) {
-  if (!attr) return {dflt, false};
-  if (auto pc = dyn_cast<strela::PushConstantAttr>(attr)) return {pc.getOrdinal(), true};
+toValueDef(Attribute attr) {
+  if (auto pc = dyn_cast<strela::PushConstantAttr>(attr)) {
+    return {pc.getOrdinal(), true};
+  }
   return {static_cast<uint32_t>(cast<IntegerAttr>(attr).getInt()), false};
 }
 
+static iree_hal_strela_ValueDef_t
+immediate(uint32_t value) {
+  return {value, false};
+}
+
+static iree_hal_strela_WorkgroupTermDef_t
+toTermDef(strela::WgAxisParamsAttr params) {
+  return {immediate(params.getStep()), immediate(params.getLimit())};
+}
+
 static iree_hal_strela_ColumnAddressDef_ref_t
-createAddress(FlatbufferBuilder &builder, const StrelaColumn &column) {
-  iree_hal_strela_ValueDef_t base = toValueDef(column.offset);
-  // The flatbuffer has no z term: z is always 1 workgroup.
-  std::array<iree_hal_strela_WorkgroupTermDef_t, 2> terms{};
-  for (size_t d = 0; d < terms.size(); ++d) {
-    terms[d].step = toValueDef(column.workgroup[d].step);
-    terms[d].limit = toValueDef(column.workgroup[d].limit);
-  }
+createAddress(FlatbufferBuilder &builder, strela::ColAddrAttr address) {
+  iree_hal_strela_ValueDef_t offset = toValueDef(address.getOffset());
+  iree_hal_strela_WorkgroupTermDef_t x = toTermDef(address.getWgXParams());
+  iree_hal_strela_WorkgroupTermDef_t y = toTermDef(address.getWgYParams());
   iree_hal_strela_ColumnAddressDef_start(builder);
-  iree_hal_strela_ColumnAddressDef_binding_add(builder, column.binding);
-  iree_hal_strela_ColumnAddressDef_base_add(builder, &base);
-  iree_hal_strela_ColumnAddressDef_wg_x_params_add(builder, &terms[0]);
-  iree_hal_strela_ColumnAddressDef_wg_y_params_add(builder, &terms[1]);
+  iree_hal_strela_ColumnAddressDef_binding_add(builder, address.getBinding());
+  iree_hal_strela_ColumnAddressDef_offset_add(builder, &offset);
+  iree_hal_strela_ColumnAddressDef_delta_add(builder, address.getDelta());
+  iree_hal_strela_ColumnAddressDef_wg_x_params_add(builder, &x);
+  iree_hal_strela_ColumnAddressDef_wg_y_params_add(builder, &y);
   return iree_hal_strela_ColumnAddressDef_end(builder);
 }
 
 static flatbuffers_vec_ref_t
-createInputs(FlatbufferBuilder &builder, ArrayRef<StrelaColumn> columns) {
+createInputs(FlatbufferBuilder &builder, ArrayAttr columns) {
   SmallVector<iree_hal_strela_InputColumnDef_ref_t> refs;
-  for (const StrelaColumn &column : columns) {
-    auto addressRef = createAddress(builder, column);
-    iree_hal_strela_ValueDef_t wordCount = toValueDef(column.wordCount);
-    iree_hal_strela_ValueDef_t wordStride = toValueDef(column.wordStride);
+  for (auto column : columns.getAsRange<strela::InpColAttr>()) {
+    auto addressRef = createAddress(builder, column.getAddress());
+    iree_hal_strela_ValueDef_t wordCount = immediate(column.getWords());
+    iree_hal_strela_ValueDef_t wordStride = immediate(column.getStride());
     iree_hal_strela_InputColumnDef_start(builder);
     iree_hal_strela_InputColumnDef_address_add(builder, addressRef);
     iree_hal_strela_InputColumnDef_word_count_add(builder, &wordCount);
@@ -251,11 +82,11 @@ createInputs(FlatbufferBuilder &builder, ArrayRef<StrelaColumn> columns) {
 }
 
 static flatbuffers_vec_ref_t
-createOutputs(FlatbufferBuilder &builder, ArrayRef<StrelaColumn> columns) {
+createOutputs(FlatbufferBuilder &builder, ArrayAttr columns) {
   SmallVector<iree_hal_strela_OutputColumnDef_ref_t> refs;
-  for (const StrelaColumn &column : columns) {
-    auto addressRef = createAddress(builder, column);
-    iree_hal_strela_ValueDef_t wordCount = toValueDef(column.wordCount);
+  for (auto column : columns.getAsRange<strela::OutColAttr>()) {
+    auto addressRef = createAddress(builder, column.getAddress());
+    iree_hal_strela_ValueDef_t wordCount = immediate(column.getWords());
     iree_hal_strela_OutputColumnDef_start(builder);
     iree_hal_strela_OutputColumnDef_address_add(builder, addressRef);
     iree_hal_strela_OutputColumnDef_word_count_add(builder, &wordCount);
@@ -314,7 +145,7 @@ StrelaTargetBackend::buildTranslationPassPipeline(
   passManager.addPass(estela::createResolveWorkgroupCountPass());
 
   // Resolve the dispatch interface while the full executable source is still
-  // around, and leave the answer in the IR as strela.binding_load/store.
+  // around, and leave the answer in the IR as a strela.job.
   passManager.nest<ModuleOp>().addNestedPass<func::FuncOp>(
     estela::createMaterializeBindingsPass()
   );
@@ -346,11 +177,6 @@ StrelaTargetBackend::serializeExecutable(
     return variantOp.emitOpError("has no inner module to serialize");
   }
 
-  strela::TargetDescAttr targetDesc = findStrelaTargetDesc(variantOp);
-  if (!targetDesc) {
-    return variantOp.emitOpError("has no target description");
-  }
-
   FlatbufferBuilder builder;
   iree_hal_strela_ExecutableDef_start_as_root(builder);
 
@@ -366,16 +192,16 @@ StrelaTargetBackend::serializeExecutable(
     if (!funcOp) {
       return exportOp.emitOpError("has no function in the inner module");
     }
-    FailureOr<StrelaExport> strelaExport = getExport(funcOp, targetDesc);
-    if (failed(strelaExport)) return failure();
+    FailureOr<strela::JobOp> jobOp = getJob(funcOp);
+    if (failed(jobOp)) return failure();
 
     auto layoutAttr = exportOp.getLayoutAttr();
     auto nameRef = builder.createString(exportOp.getSymName());
-    const auto &bitstream = strelaExport->bitstream;
+    SmallVector<uint32_t> bitstream(jobOp->getBitstream());
     auto bitstreamRef =
         flatbuffers_uint32_vec_create(builder, bitstream.data(), bitstream.size());
-    flatbuffers_vec_ref_t inputsRef = createInputs(builder, strelaExport->inputs);
-    flatbuffers_vec_ref_t outputsRef = createOutputs(builder, strelaExport->outputs);
+    flatbuffers_vec_ref_t inputsRef = createInputs(builder, jobOp->getInputs());
+    flatbuffers_vec_ref_t outputsRef = createOutputs(builder, jobOp->getOutputs());
 
     iree_hal_strela_ExportDef_start(builder);
     iree_hal_strela_ExportDef_name_add(builder, nameRef);
@@ -383,9 +209,11 @@ StrelaTargetBackend::serializeExecutable(
     iree_hal_strela_ExportDef_inputs_add(builder, inputsRef);
     iree_hal_strela_ExportDef_outputs_add(builder, outputsRef);
     iree_hal_strela_ExportDef_constant_count_add(
-        builder, static_cast<uint32_t>(layoutAttr.getConstants()));
+      builder, static_cast<uint32_t>(layoutAttr.getConstants())
+    );
     iree_hal_strela_ExportDef_binding_count_add(
-        builder, static_cast<uint32_t>(layoutAttr.getBindings().size()));
+      builder, static_cast<uint32_t>(layoutAttr.getBindings().size())
+    );
     exportRefs[ordinalAttr.getInt()] = iree_hal_strela_ExportDef_end(builder);
   }
   auto exportsRef = builder.createOffsetVecDestructive(exportRefs);

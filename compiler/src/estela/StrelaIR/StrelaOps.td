@@ -25,67 +25,14 @@ def MatvecOp : Strela_Op<"matvec", [Pure]> {
   let hasVerifier = 1;
 }
 
-// TODO: remove
-class Strela_BindingOp<string mnemonic, list<Trait> traits = []> :
-    Strela_Op<mnemonic, traits>;
-
-// TODO: remove
-def BindingLoadOp : Strela_BindingOp<"binding_load", [Pure]> {
-  let summary = "Reads a STRELA kernel operand from a dispatch binding";
-  let description = [{
-    Replaces the `hal.interface.binding.subspan` plus
-    `iree_tensor_ext.dispatch.tensor.load` pair that fed a STRELA kernel, along
-    with the push constant loads and the arithmetic that reassembled the byte
-    offset from them. `iree-strela-materialize-bindings` resolves all of that
-    once and leaves this op in its place, so the dispatch interface is stated
-    directly instead of having to be recovered from the surrounding IR.
-
-    ```mlir
-    %0 = strela.binding_load binding(0) offset_ordinal 1 : tensor<?x9xi32>
-    %1 = strela.binding_load binding(0) byte_offset 320 : tensor<72xi32>
-    ```
-  }];
-  let arguments = (ins
-    I64Attr:$binding,
-    OptionalAttr<I64Attr>:$offset_ordinal,
-    OptionalAttr<I64Attr>:$byte_offset
-  );
-  let results = (outs I32Tensor:$result);
-  let assemblyFormat = [{
-    `binding` `(` $binding `)` (`offset_ordinal` $offset_ordinal^)?
-    (`byte_offset` $byte_offset^)? attr-dict `:` type($result)
-  }];
-  let hasVerifier = 1;
-}
-
-// TODO(Diego): remove
-def BindingStoreOp : Strela_BindingOp<"binding_store"> {
-  let summary = "Writes a STRELA kernel result to a dispatch binding";
-  let description = [{
-    The counterpart of `strela.binding_load`, replacing the
-    `iree_tensor_ext.dispatch.tensor.store` that consumed a STRELA kernel result.
-    Not `Pure`: it is the only writing op left in the dispatch body and must not
-    be folded away.
-
-    ```mlir
-    strela.binding_store %0, binding(1) offset_ordinal 2 : tensor<?x9xi32>
-    strela.binding_store %1, binding(1) byte_offset 320 : tensor<72xi32>
-    ```
-  }];
-  let arguments = (ins
-    I32Tensor:$value,
-    I64Attr:$binding,
-    OptionalAttr<I64Attr>:$offset_ordinal,
-    OptionalAttr<I64Attr>:$byte_offset
-  );
-  let assemblyFormat = [{
-    $value `,` `binding` `(` $binding `)` (`offset_ordinal` $offset_ordinal^)?
-    (`byte_offset` $byte_offset^)? attr-dict `:` type($value)
-  }];
-  let hasVerifier = 1;
-}
-
 def JobOp : Strela_Op<"job"> {
+  let summary = "One STRELA job: a bitstream and its DMA columns";
+  let description = [{
+    What the hardware runs for each workgroup, and exactly what the serializer
+    writes as an `ExportDef`: the bitstream words, then one input and one output
+    column per fabric column, in hardware column order. Not `Pure`: it is the
+    only op of a dispatch that writes memory.
+  }];
   let arguments = (ins
     DenseI32ArrayAttr:$bitstream,
     TypedArrayAttrBase<Strela_InpColAttr, "input columns">:$inputs,

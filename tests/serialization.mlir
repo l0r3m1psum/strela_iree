@@ -48,8 +48,9 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // it. Addresses are in bytes, counts and strides in words.
 //
 // The grid is (ceildiv(F, 3), N, 1) = (1, 2, 1): one job per row, each
-// computing all three features. A column's address is offset plus, for each
-// workgroup id, min(id * step, limit).
+// computing all three features. A column's address is offset (where the tensor
+// starts in the binding) plus delta (where the column starts in the tensor)
+// plus, for each workgroup id, min(id * step, limit).
 //
 // The first column, row y of %x, is spelled out in full. It starts at byte 0
 // of binding 0 and moves one row of C words, 64 bytes, per y; x does not
@@ -57,10 +58,11 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK:            "inputs": [{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
-// CHECK-NEXT:             "base": {
+// CHECK-NEXT:             "offset": {
 // CHECK-NEXT:               "value": 0,
 // CHECK-NEXT:               "is_constant": false
 // CHECK-NEXT:             },
+// CHECK-NEXT:             "delta": 0,
 // CHECK-NEXT:             "wg_x_params": {
 // CHECK-NEXT:               "step": {
 // CHECK-NEXT:                 "value": 0,
@@ -91,15 +93,19 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:             "is_constant": false
 // CHECK-NEXT:           }
 
-// Columns 1-3 read the three columns of %w: C words, one every F = 3.
+// Columns 1-3 read the three columns of %w: C words, one every F = 3,
+// starting 0, 4 and 8 bytes into %w.
 // FuseDispatchBindings put both operands in binding 0, %w right after the 128
 // bytes of %x, a constant offset so no push constants are involved. With
 // F = 3 there is a single x, so the x clamp is 4(F - 3) = 0.
 // CHECK-NEXT:         },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
-// CHECK-NEXT:             "base": {
+// CHECK-NEXT:             "offset": {
 // CHECK-NEXT:               "value": 128,
+// CHECK-NEXT:               "is_constant": false
+// CHECK-NEXT:             },
+// CHECK-NEXT:             "delta": 0,
 // CHECK:                "word_count": {
 // CHECK-NEXT:             "value": 16,
 // CHECK-NEXT:             "is_constant": false
@@ -109,13 +115,19 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK:              },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
-// CHECK-NEXT:             "base": {
-// CHECK-NEXT:               "value": 132,
+// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:               "value": 128,
+// CHECK-NEXT:               "is_constant": false
+// CHECK-NEXT:             },
+// CHECK-NEXT:             "delta": 4,
 // CHECK:              },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 0,
-// CHECK-NEXT:             "base": {
-// CHECK-NEXT:               "value": 136,
+// CHECK-NEXT:             "offset": {
+// CHECK-NEXT:               "value": 128,
+// CHECK-NEXT:               "is_constant": false
+// CHECK-NEXT:             },
+// CHECK-NEXT:             "delta": 8,
 
 // A word count of 0 leaves a column unused; its other fields are still
 // present. The matvec does not use output column 0. Outputs have no
@@ -131,8 +143,11 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:         },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 1,
-// CHECK-NEXT:             "base": {
+// CHECK-NEXT:             "offset": {
 // CHECK-NEXT:               "value": 0,
+// CHECK-NEXT:               "is_constant": false
+// CHECK-NEXT:             },
+// CHECK-NEXT:             "delta": 0,
 // CHECK:                  "wg_y_params": {
 // CHECK-NEXT:               "step": {
 // CHECK-NEXT:                 "value": 12,

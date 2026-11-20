@@ -11,11 +11,21 @@ struct ValueDef { value:uint32; is_constant:bool; }
 struct WorkgroupTermDef { step:ValueDef; limit:ValueDef; }
 
 // Bytes from the start of the binding:
-//   base + sum(min(d * d_step, d_limit) for d in {x,y})
+//   offset + delta + sum(min(d * d_step, d_limit) for d in {x,y})
 // d is the workgroup id along that dimension, known only at dispatch.
+//
+// offset is where the tensor starts in the binding, delta is where the column
+// starts in the tensor. FuseDispatchBindings packs the operands of several
+// dispatch sites of one executable into one binding, each at a different
+// offset, so the kernel reads the offset of a tensor from a push constant:
+//   binding 0: [ AAAA | BBBB | ... ]    offset of the weights: A for site 0,
+//                ^      ^               B for site 1
+// Weight column k of the matvec starts 4k bytes into the weights at every site,
+// so delta is fixed at compile time while offset is not.
 table ColumnAddressDef  {
   binding:uint32;
-  base:ValueDef (required); // used when multiple tensors are in one binding
+  offset:ValueDef (required); // immediate, or the push constant holding it
+  delta:uint32;               // always an immediate
   wg_x_params:WorkgroupTermDef (required);
   wg_y_params:WorkgroupTermDef (required);
   // wg_z is never used

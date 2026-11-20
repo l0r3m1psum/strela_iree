@@ -31,8 +31,10 @@
 // RUN:   %s -o /dev/null
 
 // The add and the ReLU stay on the CPU: STRELA only runs the matvec.
-// CHECK:     strela.matvec %{{.+}}, %{{.+}} : tensor<8x16xi32>, tensor<16x9xi32> -> tensor<8x9xi32>
-// CHECK-NOT: strela.matvec
+// CHECK:     strela.job
+// CHECK-SAME:  inputs([#strela.inp_col<{{[^#]*}}words = 16, stride = 1>,
+// CHECK-SAME:          #strela.inp_col<{{[^#]*}}words = 16, stride = 9>,
+// CHECK-NOT: strela.job
 
 module attributes {
   stream.topology = #hal.device.topology<links = [
