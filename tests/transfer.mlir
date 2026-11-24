@@ -2,22 +2,26 @@
 // the elementwise ops emits a runtime "is this dim 1?" broadcast check as its
 // own dispatch, which is not what these tests are about.
 //
-// RUN: iree-compile --iree-plugin=estela --split-input-file \
+// RUN: iree-compile --iree-plugin=estela --iree-strela-multiplier-width=32 --split-input-file \
 // RUN:   --iree-execution-model=async-external \
 // RUN:   --iree-hal-target-device=device_a=local[0] \
 // RUN:   --iree-hal-target-device=device_b=strela \
 // RUN:   --iree-hal-default-device=device_a \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --compile-to=executable-targets %s | FileCheck %s
+// RUN:   --mlir-print-local-scope --compile-to=executable-targets %s | FileCheck %s
 //
-// RUN: iree-compile --iree-plugin=estela --split-input-file \
+// RUN: iree-compile --iree-plugin=estela --iree-strela-multiplier-width=32 --split-input-file \
 // RUN:   --iree-scheduling-optimize-bindings=false \
 // RUN:   --iree-execution-model=async-external \
 // RUN:   --iree-hal-target-device=device_a=local[0] \
 // RUN:   --iree-hal-target-device=device_b=strela \
 // RUN:   --iree-hal-default-device=device_a \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --compile-to=executable-targets %s | FileCheck %s --check-prefix=UNFUSED
+// RUN:   --mlir-print-local-scope --compile-to=executable-targets %s | FileCheck %s --check-prefix=UNFUSED
+//
+// The inputs are i32 of unknown range, which the operand-width check keeps on
+// the host: --iree-strela-multiplier-width=32 lifts it (operand_width.mlir
+// tests it).
 
 // The work meant for device_a is a sub and a minimum, which STRELA has no kernel
 // for; the matvec runs on device_b. Not valid TOSA (no i32 matmul), but it is
@@ -29,28 +33,36 @@
 //
 // The job reads the row (C = 16 words) from binding 0, the weights (C words
 // F = 9 apart, 4 bytes between columns) from binding 1, and writes the result
-// to binding 2. Only the binding, offset and stride of each column are checked
-// here; materialize_bindings.mlir checks the rest.
+// to binding 2. Only the binding, address, words and stride of each column are
+// checked here; Transforms/tests/convert_to_strela_abi.mlir checks the rest.
 //
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
+// CHECK:     %[[WG_Y:[^ ]+]] = strela.workgroup_id[1] : index
+// CHECK:     %[[WG_X:[^ ]+]] = strela.workgroup_id[0] : index
+// CHECK:     %[[A0:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 64)>()[%[[WG_Y]]]
+// CHECK:     strela.inp_column binding(0) address(%[[A0]]) words(16) stride(1)
+// CHECK:     %[[A1:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12)>()[%[[WG_X]]]
+// CHECK:     strela.inp_column binding(1) address(%[[A1]]) words(16) stride(9)
+// CHECK:     %[[A2:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12 + 4)>()[%[[WG_X]]]
+// CHECK:     strela.inp_column binding(1) address(%[[A2]]) words(16) stride(9)
+// CHECK:     %[[A3:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12 + 8)>()[%[[WG_X]]]
+// CHECK:     strela.inp_column binding(1) address(%[[A3]]) words(16) stride(9)
+// CHECK:     strela.out_column unused
+// CHECK:     %[[R1:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12)>()[%[[WG_Y]], %[[WG_X]]]
+// CHECK:     strela.out_column binding(2) address(%[[R1]]) words(1)
+// CHECK:     %[[R2:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12 + 4)>()[%[[WG_Y]], %[[WG_X]]]
+// CHECK:     strela.out_column binding(2) address(%[[R2]]) words(1)
+// CHECK:     %[[R3:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12 + 8)>()[%[[WG_Y]], %[[WG_X]]]
+// CHECK:     strela.out_column binding(2) address(%[[R3]]) words(1)
 // CHECK:     strela.job
-// CHECK-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32, delta = 0,{{[^#]*}}words = 16, stride = 1>,
-// CHECK-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32, delta = 0,{{[^#]*}}words = 16, stride = 9>,
-// CHECK-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32, delta = 4,{{[^#]*}}words = 16, stride = 9>,
-// CHECK-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32, delta = 8,{{[^#]*}}words = 16, stride = 9>])
-// CHECK-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
-// CHECK-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32, delta = 0,{{[^#]*}}words = 1>,
-// CHECK-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32, delta = 4,{{[^#]*}}words = 1>,
-// CHECK-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32, delta = 8,{{[^#]*}}words = 1>])
 
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
-// UNFUSED:     strela.job
-// UNFUSED-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32
-// UNFUSED-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32
-// UNFUSED-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
-// UNFUSED-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32
+// UNFUSED:     strela.inp_column binding(0) address(
+// UNFUSED:     strela.inp_column binding(1) address(
+// UNFUSED:     strela.out_column unused
+// UNFUSED:     strela.out_column binding(2) address(
 
 module attributes {
   stream.topology = #hal.device.topology<links = [
@@ -94,29 +106,40 @@ module attributes {
 
 // -----
 
-// Variant 2: the same program without the topology. The compiler does not know
-// the devices share memory, so it stages the transfers through extra buffers;
-// FuseDispatchBindings then packs both matvec operands into one binding and
-// the second one gets a compile-time byte offset: 512 is 8 x 16 x i32, the
-// bytes of %x, already a multiple of the 64 byte alignment.
+// Variant 2: the same program without a topology attribute. AssignTopology
+// gives it STRELA's: each device works on the other's buffers in place, so no
+// transfer is staged and, as in variant 1, each operand keeps its own binding
+// and every subspan starts at byte zero. (An older topology made the CPU's
+// data go through a staging buffer, where FuseDispatchBindings packed both
+// operands at compile-time offsets.)
 //
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
+// CHECK:     %[[WG_Y:[^ ]+]] = strela.workgroup_id[1] : index
+// CHECK:     %[[WG_X:[^ ]+]] = strela.workgroup_id[0] : index
+// CHECK:     %[[A0:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 64)>()[%[[WG_Y]]]
+// CHECK:     strela.inp_column binding(0) address(%[[A0]]) words(16) stride(1)
+// CHECK:     %[[A1:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12)>()[%[[WG_X]]]
+// CHECK:     strela.inp_column binding(1) address(%[[A1]]) words(16) stride(9)
+// CHECK:     %[[A2:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12 + 4)>()[%[[WG_X]]]
+// CHECK:     strela.inp_column binding(1) address(%[[A2]]) words(16) stride(9)
+// CHECK:     %[[A3:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12 + 8)>()[%[[WG_X]]]
+// CHECK:     strela.inp_column binding(1) address(%[[A3]]) words(16) stride(9)
+// CHECK:     strela.out_column unused
+// CHECK:     %[[R1:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12)>()[%[[WG_Y]], %[[WG_X]]]
+// CHECK:     strela.out_column binding(2) address(%[[R1]]) words(1)
+// CHECK:     %[[R2:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12 + 4)>()[%[[WG_Y]], %[[WG_X]]]
+// CHECK:     strela.out_column binding(2) address(%[[R2]]) words(1)
+// CHECK:     %[[R3:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12 + 8)>()[%[[WG_Y]], %[[WG_X]]]
+// CHECK:     strela.out_column binding(2) address(%[[R3]]) words(1)
 // CHECK:     strela.job
-// CHECK-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32
-// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = 512 : i32, delta = 0,
-// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = 512 : i32, delta = 4,
-// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = 512 : i32, delta = 8,
-// CHECK-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
-// CHECK-SAME:           #strela.out_col<address = <binding = 1, offset = 0 : i32
 
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
-// UNFUSED:     strela.job
-// UNFUSED-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32
-// UNFUSED-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32
-// UNFUSED-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
-// UNFUSED-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32
+// UNFUSED:     strela.inp_column binding(0) address(
+// UNFUSED:     strela.inp_column binding(1) address(
+// UNFUSED:     strela.out_column unused
+// UNFUSED:     strela.out_column binding(2) address(
 
 module {
   func.func @main(
@@ -154,33 +177,39 @@ module {
 // -----
 
 // Variant 3: TransferWrapPass places both matvecs on device_b and they share
-// one executable. FuseDispatchBindings packs the operands of the two dispatch
-// sites at different offsets, so the offsets reach the kernel as push
-// constants, each a single i32 because Stream proved it fits in 32 bits. Each
-// column adds its own compile-time delta to the push constant offset of its
-// tensor: 4k bytes for weight and result column k.
+// one executable. Each dispatch site reads its own inputs, bound where they
+// are, but both results go into one buffer: FuseDispatchBindings packs them at
+// different offsets (0 and 320), so the result offset reaches the kernel as a
+// push constant, a single i32 because Stream proved it fits in 32 bits. Each
+// result column adds its own compile-time 4k bytes to it (seen through
+// util.assume.int).
 //
 // CHECK: hal.executable.variant public @strela_bitstream
 // CHECK:   func.func @main_dispatch_{{[0-9]+}}
+// CHECK:     %[[PC0:[^ ]+]] = strela.push_constant 0 : i32
+// CHECK:     %[[Y:[^ ]+]] = arith.index_castui %[[PC0]] : i32 to index
+// CHECK:     %[[A:[^ ]+]] = util.assume.int %[[Y]][<umin = 0, umax = 0>, <umin = 320, umax = 320, udiv = 320>] : index
+// CHECK:     %[[WG_Y:[^ ]+]] = strela.workgroup_id[1] : index
+// CHECK:     %[[WG_X:[^ ]+]] = strela.workgroup_id[0] : index
+// CHECK:     strela.inp_column binding(0) address(%{{.+}}) words(16) stride(1)
+// CHECK:     strela.inp_column binding(1) address(%{{.+}}) words(16) stride(9)
+// CHECK:     strela.out_column unused
+// CHECK:     %[[R1:[^ ]+]] = affine.apply affine_map<()[s0, s1, s2] -> (s0 + s1 * 36 + s2 * 12)>()[%[[A]], %[[WG_Y]], %[[WG_X]]]
+// CHECK:     strela.out_column binding(2) address(%[[R1]])
+// CHECK:     %[[R2:[^ ]+]] = affine.apply affine_map<()[s0, s1, s2] -> (s0 + s1 * 36 + s2 * 12 + 4)>()[%[[A]], %[[WG_Y]], %[[WG_X]]]
+// CHECK:     strela.out_column binding(2) address(%[[R2]])
+// CHECK:     %[[R3:[^ ]+]] = affine.apply affine_map<()[s0, s1, s2] -> (s0 + s1 * 36 + s2 * 12 + 8)>()[%[[A]], %[[WG_Y]], %[[WG_X]]]
+// CHECK:     strela.out_column binding(2) address(%[[R3]])
 // CHECK:     strela.job
-// CHECK-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = #strela.push_constant<0>, delta = 0,
-// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = #strela.push_constant<1>, delta = 0,
-// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = #strela.push_constant<1>, delta = 4,
-// CHECK-SAME:          #strela.inp_col<address = <binding = 0, offset = #strela.push_constant<1>, delta = 8,
-// CHECK-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
-// CHECK-SAME:           #strela.out_col<address = <binding = 1, offset = #strela.push_constant<2>, delta = 0,
-// CHECK-SAME:           #strela.out_col<address = <binding = 1, offset = #strela.push_constant<2>, delta = 4,
-// CHECK-SAME:           #strela.out_col<address = <binding = 1, offset = #strela.push_constant<2>, delta = 8,
 
 // Without fused bindings every operand has a binding of its own at byte 0.
 //
 // UNFUSED: hal.executable.variant public @strela_bitstream
 // UNFUSED:   func.func @main_dispatch_{{[0-9]+}}
-// UNFUSED:     strela.job
-// UNFUSED-SAME:  inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32
-// UNFUSED-SAME:          #strela.inp_col<address = <binding = 1, offset = 0 : i32
-// UNFUSED-SAME:  outputs([#strela.out_col<{{[^#]*}}words = 0>,
-// UNFUSED-SAME:           #strela.out_col<address = <binding = 2, offset = 0 : i32
+// UNFUSED:     strela.inp_column binding(0) address(
+// UNFUSED:     strela.inp_column binding(1) address(
+// UNFUSED:     strela.out_column unused
+// UNFUSED:     strela.out_column binding(2) address(
 
 module {
   func.func @main(

@@ -5,44 +5,48 @@
 // We run the compilation flow up to various points that we use in the test to
 // illustrate what is going on.
 
-// RUN: iree-compile --split-input-file --iree-plugin=estela --compile-to=input %s \
+// RUN: iree-compile --split-input-file --iree-plugin=estela --iree-strela-multiplier-width=32 --compile-to=input %s \
 // RUN:   | FileCheck %s --enable-var-scope --check-prefix=INP
 
-// RUN: iree-compile --split-input-file --iree-plugin=estela \
+// RUN: iree-compile --split-input-file --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --compile-to=preprocessing %s | FileCheck %s --enable-var-scope --check-prefix=PRE
 
-// RUN: iree-compile --split-input-file --iree-plugin=estela \
+// RUN: iree-compile --split-input-file --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --compile-to=flow %s | FileCheck %s --enable-var-scope --check-prefix=FLW
 
-// RUN: iree-compile --split-input-file --iree-plugin=estela \
+// RUN: iree-compile --split-input-file --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --compile-to=stream %s | FileCheck %s --enable-var-scope --check-prefix=STM
 
-// RUN: iree-compile --split-input-file --iree-plugin=estela \
+// RUN: iree-compile --split-input-file --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --iree-stream-resource-index-bits=32 \
+// RUN:   --iree-stream-resource-index-bits=32 --mlir-print-local-scope \
 // RUN:   --compile-to=executable-targets %s | FileCheck %s --enable-var-scope --check-prefix=EXC
 
-// RUNFIXME: iree-compile --split-input-file --iree-plugin=estela \
+// RUNFIXME: iree-compile --split-input-file --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUNFIXME:   --iree-hal-target-device=cpu0=local[0] \
 // RUNFIXME:   --iree-hal-target-device=strela0=strela \
 // RUNFIXME:   --iree-hal-default-device=cpu0 \
 // RUNFIXME:   --iree-hal-local-target-device-backends=vmvx \
 // RUNFIXME:   --compile-to=hal %s %s | FileCheck %s --enable-var-scope --check-prefix=HAL
+//
+// The inputs are i32 of unknown range, which the operand-width check keeps on
+// the host: --iree-strela-multiplier-width=32 lifts it (operand_width.mlir
+// tests it).
 
 // TODO: --compile-to=hal shows how the work is divided between workgroups
 // hal.command_buffer.dispatch<%cmd : !hal.command_buffer> {{.+}} workgroups([%c3, %n, %c1])
@@ -79,7 +83,7 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // PRE-LABEL: module attributes {
 // PRE-SAME:  stream.affinity.default = #hal.device.affinity<@[[CPU:[a-z0-9_]+]]>
 // PRE-SAME:  stream.topology = #hal.device.topology<links = [
-// PRE-SAME:    (@[[CPU]] -> @[[STRELA:[a-z0-9_]+]] = {}),
+// PRE-SAME:    (@[[CPU]] -> @[[STRELA:[a-z0-9_]+]] = {transparent_access = true}),
 // PRE-SAME:    (@[[STRELA]] -> @[[CPU]] = {transparent_access = true})]>
 // PRE-SAME:  }
 // PRE:       util.global private @[[CPU]] = #hal.device.target<"local"
@@ -123,39 +127,33 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // TODO: talk about the flow.dispatch.tie_shape
 
 // After the data flow phase the parallelism in the dataflow graph is made
-// explicit with the stream dialect. Notice how the data is copied from the CPU
-// to STRELA but not the opposite because the CPU can read directly from STRELA
-// buffers. The stream dialect also handles allocation of buffers: we show the
-// allocation of the output buffer and a transient one that is used to copy data
-// from the CPU visible memory to the STRELA visible one. Both operands are
-// packed into it, %w at byte 0 and %x after its 16 x 9 x 4 = 576 bytes, so the
-// dispatch has a single input binding. N reaches it as two i32 operands, the
-// halves of a 64 bit index.
+// explicit with the stream dialect. The topology says each device can work on
+// the other's buffers in place (at run time, buffers STRELA touches come from
+// the STRELA allocator, --device_lead_allocator), so nothing is copied: the
+// dispatch binds the imported %x and %w as they are and writes a buffer
+// allocated for both devices, which the CPU then exports. N reaches the
+// dispatch as two i32 operands, the halves of a 64 bit index.
 
 // STM-LABEL: module attributes {
 // STM:         util.global private @[[CPU:[a-z0-9_]+]] = #hal.device.target<"local"
 // STM:         util.global private @[[STRELA:[a-z0-9_]+]] = #hal.device.target<"strela"
 // STM:         stream.executable private @[[DISPATCH:[a-z0-9_]+]] {
 // STM:           builtin.module {
-// STM:             func.func @[[DISPATCH_FUNC:[a-zA-Z0-9_]+]](%{{.+}}: !stream.binding {{.+}}, %{{.+}}: !stream.binding {{.+}}, %{{.+}}: i32, %{{.+}}: i32) {
+// STM:             func.func @[[DISPATCH_FUNC:[a-zA-Z0-9_]+]](%{{.+}}: !stream.binding {{.+}}, %{{.+}}: !stream.binding {{.+}}, %{{.+}}: !stream.binding {{.+}}, %{{.+}}: i32, %{{.+}}: i32) {
 // STM:               stream.binding.subspan %{{.+}}[%c0] : !stream.binding -> !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16x9xi32>>
-// STM:               stream.binding.subspan %{{.+}}[%c576] : !stream.binding -> !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x?x16xi32>>
+// STM:               stream.binding.subspan %{{.+}}[%c0] : !stream.binding -> !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x?x16xi32>>
 // STM:               %{{.+}} = linalg.batch_matmul
 // STM:         util.func public @matvec(%[[X:[^:]+]]: !hal.buffer_view, %[[W:[^:]+]]: !hal.buffer_view)
-// STM:           %{{.+}} = stream.tensor.import on(#hal.device.affinity<@[[CPU]]>) %[[X]] : !hal.buffer_view -> tensor<1x?x16xi32>{%{{.+}}}
-// STM:           %{{.+}} = stream.tensor.import on(#hal.device.affinity<@[[CPU]]>) %[[W]] : !hal.buffer_view -> tensor<1x16x9xi32>
+// STM:           %[[X_R:.+]] = stream.tensor.import on(#hal.device.affinity<@[[CPU]]>) %[[X]] : !hal.buffer_view -> tensor<1x?x16xi32>{%{{.+}}}
+// STM:           %[[W_R:.+]] = stream.tensor.import on(#hal.device.affinity<@[[CPU]]>) %[[W]] : !hal.buffer_view -> tensor<1x16x9xi32>
 // STM:           %{{.+}}, %{{.+}} = stream.resource.alloca uninitialized on(#hal.device.optimal<[#hal.device.affinity<@[[CPU]]>, #hal.device.affinity<@[[STRELA]]>]>) : !stream.resource<external>
-// STM:           %{{.+}}, %{{.+}} = stream.resource.alloca uninitialized on(#hal.device.affinity<@[[STRELA]]>) : !stream.resource<transient>
-// STM:           %{{.+}} = stream.cmd.execute on(#hal.device.affinity<@[[STRELA]]>)
-// STM:             stream.cmd.concurrent {
-// STM:               stream.cmd.invalidate from(#hal.device.affinity<@[[CPU]]>)
-// STM:               stream.cmd.copy %{{.+}}[%c0], %{{.+}}[%c576]
-// STM:               stream.cmd.invalidate from(#hal.device.affinity<@[[CPU]]>)
-// STM:               stream.cmd.copy %{{.+}}[%c0], %{{.+}}[%c0], %c576
+// STM:           %{{.+}} = stream.cmd.execute on(#hal.device.affinity<@[[STRELA]]>) {{.+}} with(%[[X_R]] as %[[X_A:[^:]+]]: {{.+}}, %[[W_R]] as %[[W_A:[^:]+]]: {{.+}}, %{{.+}} as %[[Y_A:[^:]+]]:
+// STM-NOT:         stream.cmd.copy
 // STM:             stream.cmd.dispatch @[[DISPATCH]]::@[[DISPATCH_FUNC]][%{{.+}}](%{{.+}}, %{{.+}} : i32, i32) {
-// STM-NEXT:          ro %{{.+}} : !stream.resource<transient>
-// STM-NEXT:          wo %{{.+}} : !stream.resource<external>
-// STM-NOT:           stream.cmd.copy
+// STM-NEXT:          ro %[[X_A]]
+// STM-NEXT:          ro %[[W_A]]
+// STM-NEXT:          wo %[[Y_A]]
+// STM-NOT:       stream.cmd.copy
 // STM:           %{{.+}} = stream.tensor.export on(#hal.device.affinity<@[[CPU]]>) %{{.+}} : tensor<1x?x9xi32>{%{{.+}}}
 
 // stream.executable are converted to hal.executable via
@@ -164,9 +162,11 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // triple of features, and replaces the matvec and the dispatch interface with a
 // strela.job: the bitstream and the 4 input and 4 output DMA columns. With
 // --iree-stream-resource-index-bits=32 N is a single push constant, which only
-// the count uses. Here the row is at byte 576 of binding 0 (input column 0),
-// the weights at its start (input columns 1-3, 4 bytes apart, C = 16 words F = 9
-// apart), and the result in binding 1 (output column 0 unused, 1-3 used).
+// the count uses. Workgroup (x, y) runs row y and features 3x .. 3x + 2: the
+// row at byte 4C·y of binding 0, %x (input column 0), the weights at byte 12x
+// of binding 1, %w (input columns 1-3, 4 bytes apart, C = 16 words F = 9
+// apart), and the result at 4F·y + 12x of binding 2 (output column 0 unused,
+// 1-3 used).
 
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable private @{{.+}} {
@@ -176,15 +176,24 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // EXC:               hal.return %[[C3]], %[[N]], %{{.+}} : index, index, index
 // EXC:             builtin.module {
 // EXC:               func.func @{{.+}}() {
+// EXC-NEXT:              %[[WG_Y:[^ ]+]] = strela.workgroup_id[1] : index
+// EXC-NEXT:              %[[WG_X:[^ ]+]] = strela.workgroup_id[0] : index
+// EXC-NEXT:              %[[A0:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 64)>()[%[[WG_Y]]]
+// EXC-NEXT:              strela.inp_column binding(0) address(%[[A0]]) words(16) stride(1)
+// EXC-NEXT:              %[[A1:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12)>()[%[[WG_X]]]
+// EXC-NEXT:              strela.inp_column binding(1) address(%[[A1]]) words(16) stride(9)
+// EXC-NEXT:              %[[A2:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12 + 4)>()[%[[WG_X]]]
+// EXC-NEXT:              strela.inp_column binding(1) address(%[[A2]]) words(16) stride(9)
+// EXC-NEXT:              %[[A3:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12 + 8)>()[%[[WG_X]]]
+// EXC-NEXT:              strela.inp_column binding(1) address(%[[A3]]) words(16) stride(9)
+// EXC-NEXT:              strela.out_column unused
+// EXC-NEXT:              %[[R1:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12)>()[%[[WG_Y]], %[[WG_X]]]
+// EXC-NEXT:              strela.out_column binding(2) address(%[[R1]]) words(1)
+// EXC-NEXT:              %[[R2:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12 + 4)>()[%[[WG_Y]], %[[WG_X]]]
+// EXC-NEXT:              strela.out_column binding(2) address(%[[R2]]) words(1)
+// EXC-NEXT:              %[[R3:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12 + 8)>()[%[[WG_Y]], %[[WG_X]]]
+// EXC-NEXT:              strela.out_column binding(2) address(%[[R3]]) words(1)
 // EXC-NEXT:              strela.job
-// EXC-SAME:                inputs([#strela.inp_col<address = <binding = 0, offset = 576 : i32, delta = 0,{{[^#]*}}words = 16, stride = 1>,
-// EXC-SAME:                        #strela.inp_col<address = <binding = 0, offset = 0 : i32, delta = 0,{{[^#]*}}words = 16, stride = 9>,
-// EXC-SAME:                        #strela.inp_col<address = <binding = 0, offset = 0 : i32, delta = 4,{{[^#]*}}words = 16, stride = 9>,
-// EXC-SAME:                        #strela.inp_col<address = <binding = 0, offset = 0 : i32, delta = 8,{{[^#]*}}words = 16, stride = 9>])
-// EXC-SAME:                outputs([#strela.out_col<{{[^#]*}}words = 0>,
-// EXC-SAME:                         #strela.out_col<address = <binding = 1, offset = 0 : i32, delta = 0,{{[^#]*}}words = 1>,
-// EXC-SAME:                         #strela.out_col<address = <binding = 1, offset = 0 : i32, delta = 4,{{[^#]*}}words = 1>,
-// EXC-SAME:                         #strela.out_col<address = <binding = 1, offset = 0 : i32, delta = 8,{{[^#]*}}words = 1>])
 // EXC-NEXT:              return
 
 // Finally compilation should conclude without problems...
@@ -293,9 +302,9 @@ func.func @matvec_relu(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable private @{{.+}} {
 // EXC:           hal.executable.variant public @strela_bitstream
+// EXC:                 strela.inp_column {{.+}} words(16) stride(1)
+// EXC:                 strela.inp_column {{.+}} words(16) stride(9)
 // EXC:                 strela.job
-// EXC-SAME:              inputs([#strela.inp_col<{{[^#]*}}words = 16, stride = 1>,
-// EXC-SAME:                      #strela.inp_col<{{[^#]*}}words = 16, stride = 9>,
 // EXC:         hal.executable private @{{.+}} {
 // EXC:           hal.executable.variant public @vmvx_bytecode_fb
 
@@ -322,30 +331,37 @@ func.func @matvec_const_weights(%x: tensor<1x1x16xi32>) -> tensor<1x1x3xi32> {
 // INP:           %[[W:.+]] = arith.constant dense<{{.+}}> : tensor<1x16x3xi32>
 // INP:           %{{.+}} = linalg.batch_matmul ins(%[[X]], %[[W]] : tensor<1x1x16xi32>, tensor<1x16x3xi32>)
 
-// The constant becomes a global, which is loaded and transferred to STRELA like
-// any other operand.
+// Being constant, the weights are transposed to F x C at preprocessing
+// (StrelaPrepareWeights), so that each feature's weights are contiguous, and
+// const-eval folds the transpose: the global holds the 3 x 16 weights and
+// nothing is transposed at run time. The global is loaded and transferred to
+// STRELA like any other operand. (The contraction is a linalg.generic now, so
+// FoldUnitExtentDims drops its unit dims.)
 
 // FLW-LABEL: module attributes {
+// FLW:         util.global private @[[CONST_GLOB:[a-z0-9_]+]] {{.+}} = dense<{{\[}}[0, 3, 6, 9, {{.+}}]]> : tensor<3x16xi32>
 // FLW:         flow.executable private @{{[a-z0-9_]+}} {
 // FLW:           builtin.module {
 // FLW:             func.func @{{[a-zA-Z0-9_]+}}(
-// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x1x16xi32>>,
-// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16x3xi32>>,
-// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x1x3xi32>>
+// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<16xi32>>,
+// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<3x16xi32>>,
+// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<writeonly:tensor<3xi32>>
 // FLW-SAME:        ) {
-// FLW:         util.global private @[[CONST_GLOB:[a-z0-9_]+]] <{{.+}}> {{{.+}}} = dense<[{{.+}}]> : tensor<1x16x3xi32>
 // FLW:         util.func public @matvec_const_weights(%{{.+}}: !hal.buffer_view) {{.+}} {
-// FLW:           %[[CONST_LOC:.+]] = util.global.load immutable @[[CONST_GLOB]] : tensor<1x16x3xi32>
-// FLW:           %{{.+}} = flow.tensor.transfer %[[CONST_LOC]] : tensor<1x16x3xi32> to #hal.device.affinity<@strela0>
+// FLW:           %[[CONST_LOC:.+]] = util.global.load immutable @[[CONST_GLOB]] : tensor<3x16xi32>
+// FLW:           %{{.+}} = flow.tensor.transfer %[[CONST_LOC]] : tensor<3x16xi32> to #hal.device.affinity<@strela0>
 
 // The weights get a binding of their own, not Indirect: constants live in a
-// buffer of their own, bound once.
+// buffer of their own, bound once. Weight column k reads row k, C contiguous
+// words 64 bytes apart.
 
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable.export public @{{.+}} layout(#hal.pipeline.layout<bindings = [{{.+}}, #hal.pipeline.binding<storage_buffer, ReadOnly>, {{.+}}]
+// EXC:                 strela.inp_column binding(0) address(%c0{{(_[0-9]+)?}}) words(16) stride(1)
+// EXC:                 strela.inp_column binding(1) address(%c0{{(_[0-9]+)?}}) words(16) stride(1)
+// EXC:                 strela.inp_column binding(1) address(%c64) words(16) stride(1)
+// EXC:                 strela.inp_column binding(1) address(%c128) words(16) stride(1)
 // EXC:                 strela.job
-// EXC-SAME:              inputs([#strela.inp_col<address = <binding = 0, offset = 0 : i32{{[^#]*}}words = 16, stride = 1>,
-// EXC-SAME:                      #strela.inp_col<address = <binding = 1, offset = 0 : i32{{[^#]*}}words = 16, stride = 3>,
 
 // -----
 

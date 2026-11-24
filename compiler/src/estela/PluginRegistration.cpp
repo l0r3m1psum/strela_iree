@@ -31,6 +31,18 @@ EstelaOptions::bindOptions(OptionsBinder &binder) {
     "iree-strela-max-column-words", maxColumnWords, llvm::cl::cat(category),
     llvm::cl::desc("Most 32-bit words a DMA column can move in one job.")
   );
+  binder.opt<unsigned>(
+    "iree-strela-multiplier-width", multiplierWidth, llvm::cl::cat(category),
+    llvm::cl::desc("Signed bits of each operand the STRELA multipliers use; a "
+                   "contraction is offloaded only if its operands are proven "
+                   "to fit.")
+  );
+  binder.opt<bool>(
+    "iree-strela-fold-bias", foldBias, llvm::cl::cat(category),
+    llvm::cl::desc("Fold the constant bias of each quantized fully connected "
+                   "layer into its STRELA matmul as extra reduction elements, "
+                   "instead of adding it on the host.")
+  );
 }
 
 namespace {
@@ -40,13 +52,6 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   static void
   registerPasses() {
     estela::registerEstelaPasses();
-  }
-
-  void
-  extendInputConversionPreprocessingPassPipeline(
-    OpPassManager &passManager, InputDialectOptions::Type inputType
-  ) override {
-    passManager.addNestedPass<func::FuncOp>(estela::createNormalizeRescalePass());
   }
 
   // --iree-input-type=typeMnemonic
@@ -67,40 +72,15 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   // <file-name> -o /dev/null
   void
   extendPreprocessingPassPipeline(OpPassManager &passManager) override {
-    // TODO: create a pass that converts all integers smaller than int32 to int32
     passManager.addPass(estela::createAssignTopologyPass());
-    // TODO(Diego): implement a pass that adds this information so that the
-    // compiler prove that some dynamic sizes are the same and needs to push
-    // less constants when launching kernels.
-#if 0
-static void
-tieInputsToInits(RewriterBase &rewriter, linalg::GenericOp op) {
-  rewriter.setInsertionPoint(op);
-  for (OpOperand *input : op.getDpsInputOperands()) {
-    Value value = input->get();
-    if (cast<ShapedType>(value.getType()).hasStaticShape()) continue;
-    for (OpOperand &init : op.getDpsInitsMutable()) {
-      if (init.get().getType() != value.getType() ||
-          op.getMatchingIndexingMap(&init) != op.getMatchingIndexingMap(input)) {
-        continue;
-      }
-      SmallVector<Value> dims = IREE::Util::buildDynamicDimsForValue(
-        op.getLoc(), init.get(), rewriter
-      );
-      Value tied = IREE::Flow::TensorTieShapeOp::create(
-        rewriter, op.getLoc(), value.getType(), value, dims
-      );
-      rewriter.modifyOpInPlace(op, [&] { input->set(tied); });
-      break;
-    }
-  }
-}
-#endif
+    // Zero points folded and constant weights transposed (each quantized fully
+    // connected layer becomes an i32 matmul from a zero fill), then the
+    // matmuls STRELA can run, with operands proven to fit its multipliers,
+    // pinned to it.
+    passManager.addNestedPass<IREE::Util::FuncOp>(
+      estela::createStrelaPrepareWeightsPass({options.foldBias})
+    );
     passManager.addNestedPass<IREE::Util::FuncOp>(estela::createTransferWrapPass());
-    // TODO:
-    // populateDecomposeLinalgOpsPattern -> explode each generic to one statement per op.
-    // Greedy re-fuse with your ControlFusionFn budget -> groups the fabric can place.
-    // util.optimization_barrier on each group's results -> DispatchCreation can't merge them back.
   }
 
   void

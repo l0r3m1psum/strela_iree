@@ -7,6 +7,11 @@
 #define GET_ATTRDEF_CLASSES
 #include "StrelaAttrs.h.inc"
 
+// The types live with the attributes: the dialect has a single one,
+// !strela.column.
+#define GET_TYPEDEF_CLASSES
+#include "StrelaTypes.h.inc"
+
 namespace mlir::strela {
 
 // The key of #strela.target_desc in the #hal.executable.target configuration.

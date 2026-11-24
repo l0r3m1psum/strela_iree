@@ -11,6 +11,10 @@ struct EstelaOptions {
   // The size register leaves 16 bits for the byte count and 16 for the byte
   // stride and the driver rejects anything larger.
   unsigned maxColumnWords = 0xFFFF / sizeof(uint32_t);
+  // multiplier.sv multiplies the low DATA_WIDTH / 2 bits of each operand.
+  unsigned multiplierWidth = 16;
+  // StrelaPrepareWeights folds constant biases into the STRELA matmuls.
+  bool foldBias = false;
 
   // Defined in PluginRegistration.cpp, next to IREE_DEFINE_COMPILER_OPTION_FLAGS.
   void bindOptions(iree_compiler::OptionsBinder &binder);

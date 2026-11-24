@@ -3,7 +3,7 @@
 // explains the format; this only follows the numbers.
 
 // RUN: rm -rf %t && mkdir -p %t
-// RUN: iree-compile --iree-plugin=estela \
+// RUN: iree-compile --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
@@ -16,20 +16,24 @@
 // or a fabric the hand-written kernel was not written for, the matvec is not
 // offloaded and runs on the CPU instead. The backend never sees it, so it has
 // nothing to reject.
-// RUN: iree-compile --iree-plugin=estela \
+// RUN: iree-compile --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --iree-strela-max-column-words=100 --compile-to=executable-targets %s \
 // RUN:   | FileCheck %s --check-prefix=CPU
-// RUN: iree-compile --iree-plugin=estela \
+// RUN: iree-compile --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --iree-strela-columns=16 --compile-to=executable-targets %s \
 // RUN:   | FileCheck %s --check-prefix=CPU
+//
+// The inputs are i32 of unknown range, which the operand-width check keeps on
+// the host: --iree-strela-multiplier-width=32 lifts it (operand_width.mlir
+// tests it).
 // CPU-NOT: strela.matvec
 // CPU:     hal.executable.variant public @vmvx_bytecode_fb
 // CPU:       hal.executable.export public @matvec_dispatch_0_batch_matmul_
@@ -55,13 +59,13 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:        1048704,
 
 // Column 0 reads row y of %x: C = 16 contiguous words, 4C = 64 bytes further
-// for each y. FuseDispatchBindings packed both operands into binding 0, %x
-// after the 512 bytes of %w.
+// for each y, in binding 0. Each operand has a binding of its own: each device
+// works on the other's buffers in place, so nothing packs them into one.
 // CHECK:      "inputs": [{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 0,
 // CHECK-NEXT:     "offset": {
-// CHECK-NEXT:       "value": 512,
+// CHECK-NEXT:       "value": 0,
 // CHECK-NEXT:       "is_constant": false
 // CHECK-NEXT:     },
 // CHECK-NEXT:     "delta": 0,
@@ -77,11 +81,11 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK-NEXT:     "value": 1,
 
 // Columns 1-3 read columns f0, f0 + 1 and f0 + 2 of %w: C words, one every
-// F = 8, at deltas 0, 4 and 8 bytes into %w. Each x moves them 3 features, 12 bytes,
+// F = 8, at 0, 4 and 8 bytes into %w. Each x moves them 3 features, 12 bytes,
 // up to the clamp of 4(F - 3) = 20 bytes; y does not move them.
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
-// CHECK-NEXT:     "binding": 0,
+// CHECK-NEXT:     "binding": 1,
 // CHECK-NEXT:     "offset": {
 // CHECK-NEXT:       "value": 0,
 // CHECK-NEXT:       "is_constant": false
@@ -101,30 +105,30 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK-NEXT:     "value": 8,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
-// CHECK-NEXT:     "binding": 0,
+// CHECK-NEXT:     "binding": 1,
 // CHECK-NEXT:     "offset": {
-// CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "value": 4,
 // CHECK-NEXT:       "is_constant": false
 // CHECK-NEXT:     },
-// CHECK-NEXT:     "delta": 4,
+// CHECK-NEXT:     "delta": 0,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
-// CHECK-NEXT:     "binding": 0,
+// CHECK-NEXT:     "binding": 1,
 // CHECK-NEXT:     "offset": {
-// CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "value": 8,
 // CHECK-NEXT:       "is_constant": false
 // CHECK-NEXT:     },
-// CHECK-NEXT:     "delta": 8,
+// CHECK-NEXT:     "delta": 0,
 
 // Output column 0 is unused. Columns 1-3 each write one word, result[y, f0 + k]
-// in binding 1: 12 bytes per x with the same clamp, a row of 4F = 32 bytes
+// in binding 2: 12 bytes per x with the same clamp, a row of 4F = 32 bytes
 // per y.
 // CHECK:      "outputs": [{
 // CHECK:        "word_count": {
 // CHECK-NEXT:     "value": 0,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
-// CHECK-NEXT:     "binding": 1,
+// CHECK-NEXT:     "binding": 2,
 // CHECK-NEXT:     "offset": {
 // CHECK-NEXT:       "value": 0,
 // CHECK-NEXT:       "is_constant": false
@@ -142,22 +146,22 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK-NEXT:     "value": 1,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
-// CHECK-NEXT:     "binding": 1,
+// CHECK-NEXT:     "binding": 2,
 // CHECK-NEXT:     "offset": {
-// CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "value": 4,
 // CHECK-NEXT:       "is_constant": false
 // CHECK-NEXT:     },
-// CHECK-NEXT:     "delta": 4,
+// CHECK-NEXT:     "delta": 0,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
-// CHECK-NEXT:     "binding": 1,
+// CHECK-NEXT:     "binding": 2,
 // CHECK-NEXT:     "offset": {
-// CHECK-NEXT:       "value": 0,
+// CHECK-NEXT:       "value": 8,
 // CHECK-NEXT:       "is_constant": false
 // CHECK-NEXT:     },
-// CHECK-NEXT:     "delta": 8,
+// CHECK-NEXT:     "delta": 0,
 
 // Two push constants, the low and high halves of N, which only the workgroup
-// count uses; no column needs one.
+// count uses; no column needs one. Three bindings: %x, %w and the result.
 // CHECK:      "constant_count": 2,
-// CHECK-NEXT: "binding_count": 2
+// CHECK-NEXT: "binding_count": 3

@@ -3,9 +3,11 @@ iree_cc_library(
     Utils
   HDRS
     "Bitstreams.h"
+    "ElementRange.h"
     "Finders.h"
     "StrelaContraction.h"
   SRCS
+    "ElementRange.cpp"
     "Finders.cpp"
     "StrelaContraction.cpp"
   DEPS
@@ -14,9 +16,12 @@ iree_cc_library(
     iree::compiler::Dialect::HAL::IR
     iree::compiler::Dialect::Util::IR
     MLIRArithDialect
+    MLIRDialectUtils
+    MLIRInferIntRangeInterface
     MLIRIR
     MLIRLinalgDialect
     MLIRLinalgUtils
     MLIRSupport
+    MLIRTensorDialect
   PUBLIC
 )

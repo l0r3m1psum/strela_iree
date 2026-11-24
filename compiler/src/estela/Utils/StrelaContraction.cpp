@@ -3,6 +3,8 @@
 #include "estela/Utils/Bitstreams.h"
 
 #include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/IR/Matchers.h"
 
 namespace mlir::estela {
@@ -45,7 +47,8 @@ filterBatchDims(ArrayRef<AffineExpr> mapResults, ArrayRef<unsigned> batch) {
 // indices in an einsum contraction (remember that it can always be implemented
 // as a reshape -> matmul -> reshape)
 FailureOr<StrelaMatvecShape>
-matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc) {
+matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc,
+                       bool asIfTransposed) {
   if (!desc || desc.getRows() != strelaKernelRows
       || desc.getColumns() != strelaKernelColumns) {
     return failure();
@@ -73,9 +76,10 @@ matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc) {
 
   // The layouts of linalg.batch_matmul once the unit batch dims are dropped:
   // lhs (n, c), rhs (c, f) and out (n, f), without n when M is empty. That
-  // is, the activations (lhs) are C-contiguous, the weights (rhs) and the
-  // result (out) are F-contiguous.
-  SmallVector<unsigned> lhs, rhs{c, f}, out;
+  // is, the activations (lhs) are C-contiguous, the result (out) F-contiguous.
+  // The weights (rhs) are either F-contiguous (c, f), as TOSA has them, or
+  // C-contiguous (f, c), as StrelaPrepareWeights transposes constant ones.
+  SmallVector<unsigned> lhs, out;
   if (!dims->m.empty()) {
     lhs.push_back(dims->m[0]);
     out.push_back(dims->m[0]);
@@ -84,20 +88,25 @@ matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc) {
   out.push_back(f);
 
   SmallVector<AffineMap> maps = op.getIndexingMapsArray();
+  SmallVector<unsigned> rhs = filterBatchDims(maps[1].getResults(), dims->batch);
+  bool weightsTransposed = rhs == SmallVector<unsigned>{f, c};
   if (   filterBatchDims(maps[0].getResults(), dims->batch) != lhs
-      || filterBatchDims(maps[1].getResults(), dims->batch) != rhs
+      || (rhs != SmallVector<unsigned>{c, f} && !weightsTransposed)
       || filterBatchDims(maps[2].getResults(), dims->batch) != out) {
     return failure();
   }
 
   // Static C and F, at least one full job of features, and a weight column
-  // that fits the DMA word counter. N may be dynamic.
+  // that fits the DMA word counter: C words F apart span C * F words, C
+  // contiguous words span C. N may be dynamic.
   int64_t channels = ranges[c], features = ranges[f];
   if (ShapedType::isDynamic(channels) || ShapedType::isDynamic(features)) {
     return failure();
   }
+  int64_t span = weightsTransposed || asIfTransposed ? channels
+                                                     : channels * features;
   if (features < strelaMatvecFeaturesPerJob
-      || channels * features > static_cast<int64_t>(desc.getMaxColumnWords())) {
+      || span > static_cast<int64_t>(desc.getMaxColumnWords())) {
     return failure();
   }
 
@@ -112,7 +121,35 @@ matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc) {
 
   // N is the M dim's size, dynamic or not, or 1 when M is empty.
   int64_t rows = dims->m.empty() ? 1 : ranges[dims->m[0]];
-  return StrelaMatvecShape{rows, channels, features};
+  return StrelaMatvecShape{rows, channels, features, *dims, weightsTransposed};
+}
+
+FailureOr<Value>
+reshapeTo(OpBuilder &b, Location loc, Value v, RankedTensorType tgtType) {
+  using Reassociation = std::optional<SmallVector<ReassociationIndices>>;
+
+  auto srcType = cast<RankedTensorType>(v.getType());
+  int64_t srcTypeRank = srcType.getRank();
+  int64_t tgtTypeRank = tgtType.getRank();
+  if (srcType == tgtType) return v;
+  if (srcTypeRank == tgtTypeRank) { // e.g. [16, 1] becomes [1, 16]
+    SmallVector<int64_t> squeezed;
+    for (int64_t d : srcType.getShape()) {
+      if (d != 1) squeezed.push_back(d);
+    }
+    if (static_cast<int64_t>(squeezed.size()) == srcTypeRank) return failure();
+    auto squeezedType = RankedTensorType::get(squeezed, srcType.getElementType());
+    FailureOr<Value> squeezedValue = reshapeTo(b, loc, v, squeezedType);
+    if (failed(squeezedValue)) return failure();
+    return reshapeTo(b, loc, *squeezedValue, tgtType);
+  }
+  Reassociation reassoc = getReassociationIndicesForReshape(srcType, tgtType);
+  if (!reassoc) return failure();
+  if (srcTypeRank > tgtTypeRank) {
+    return tensor::CollapseShapeOp::create(b, loc, tgtType, v, *reassoc)
+      .getResult();
+  }
+  return tensor::ExpandShapeOp::create(b, loc, tgtType, v, *reassoc).getResult();
 }
 
 } // namespace mlir::estela

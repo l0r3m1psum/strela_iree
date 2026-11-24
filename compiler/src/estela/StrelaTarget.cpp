@@ -8,7 +8,9 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
 
+#include "estela/StrelaIR/ColumnAddress.h"
 #include "estela/StrelaIR/StrelaDialect.h"
 #include "estela/StrelaIR/StrelaOps.h"
 #include "estela/StrelaIR/StrelaAttrs.h"
@@ -32,46 +34,48 @@ getJob(func::FuncOp funcOp) {
   return jobOps.front();
 }
 
-// An immediate, or the ordinal of the push constant holding the value.
-static iree_hal_strela_ValueDef_t
-toValueDef(Attribute attr) {
-  if (auto pc = dyn_cast<strela::PushConstantAttr>(attr)) {
-    return {pc.getOrdinal(), true};
-  }
-  return {static_cast<uint32_t>(cast<IntegerAttr>(attr).getInt()), false};
-}
-
 static iree_hal_strela_ValueDef_t
 immediate(uint32_t value) {
   return {value, false};
 }
 
-static iree_hal_strela_WorkgroupTermDef_t
-toTermDef(strela::WgAxisParamsAttr params) {
-  return {immediate(params.getStep()), immediate(params.getLimit())};
-}
-
+// Splits the folded address into the schema's fields: the push constant is
+// the offset and the constant the delta; without a push constant the constant
+// is the offset. The runtime only adds them.
 static iree_hal_strela_ColumnAddressDef_ref_t
-createAddress(FlatbufferBuilder &builder, strela::ColAddrAttr address) {
-  iree_hal_strela_ValueDef_t offset = toValueDef(address.getOffset());
-  iree_hal_strela_WorkgroupTermDef_t x = toTermDef(address.getWgXParams());
-  iree_hal_strela_WorkgroupTermDef_t y = toTermDef(address.getWgYParams());
+createAddress(
+  FlatbufferBuilder &builder, uint32_t binding,
+  const strela::ColumnAddress &address
+) {
+  iree_hal_strela_ValueDef_t offset = address.pushConstant
+    ? iree_hal_strela_ValueDef_t{*address.pushConstant, true}
+    : immediate(address.constant);
+  uint32_t delta = address.pushConstant ? address.constant : 0;
+  iree_hal_strela_WorkgroupTermDef_t terms[2];
+  for (int d = 0; d < 2; ++d) {
+    terms[d] = {immediate(address.wg[d].step), immediate(address.wg[d].limit)};
+  }
   iree_hal_strela_ColumnAddressDef_start(builder);
-  iree_hal_strela_ColumnAddressDef_binding_add(builder, address.getBinding());
+  iree_hal_strela_ColumnAddressDef_binding_add(builder, binding);
   iree_hal_strela_ColumnAddressDef_offset_add(builder, &offset);
-  iree_hal_strela_ColumnAddressDef_delta_add(builder, address.getDelta());
-  iree_hal_strela_ColumnAddressDef_wg_x_params_add(builder, &x);
-  iree_hal_strela_ColumnAddressDef_wg_y_params_add(builder, &y);
+  iree_hal_strela_ColumnAddressDef_delta_add(builder, delta);
+  iree_hal_strela_ColumnAddressDef_wg_x_params_add(builder, &terms[0]);
+  iree_hal_strela_ColumnAddressDef_wg_y_params_add(builder, &terms[1]);
   return iree_hal_strela_ColumnAddressDef_end(builder);
 }
 
-static flatbuffers_vec_ref_t
-createInputs(FlatbufferBuilder &builder, ArrayAttr columns) {
+// The job verifier has already checked that every column folds, so a failure
+// here only passes the diagnostic on.
+static FailureOr<flatbuffers_vec_ref_t>
+createInputs(FlatbufferBuilder &builder, ValueRange columns) {
   SmallVector<iree_hal_strela_InputColumnDef_ref_t> refs;
-  for (auto column : columns.getAsRange<strela::InpColAttr>()) {
-    auto addressRef = createAddress(builder, column.getAddress());
-    iree_hal_strela_ValueDef_t wordCount = immediate(column.getWords());
-    iree_hal_strela_ValueDef_t wordStride = immediate(column.getStride());
+  for (Value column : columns) {
+    auto columnOp = column.getDefiningOp<strela::InpColumnOp>();
+    FailureOr<strela::ColumnAddress> address = strela::getColumnAddress(columnOp);
+    if (failed(address)) return failure();
+    auto addressRef = createAddress(builder, columnOp.getBinding(), *address);
+    iree_hal_strela_ValueDef_t wordCount = immediate(columnOp.getWords());
+    iree_hal_strela_ValueDef_t wordStride = immediate(columnOp.getStride());
     iree_hal_strela_InputColumnDef_start(builder);
     iree_hal_strela_InputColumnDef_address_add(builder, addressRef);
     iree_hal_strela_InputColumnDef_word_count_add(builder, &wordCount);
@@ -81,12 +85,23 @@ createInputs(FlatbufferBuilder &builder, ArrayAttr columns) {
   return builder.createOffsetVecDestructive(refs);
 }
 
-static flatbuffers_vec_ref_t
-createOutputs(FlatbufferBuilder &builder, ArrayAttr columns) {
+// An unused column is written as moving no words from byte 0 of binding 0.
+static FailureOr<flatbuffers_vec_ref_t>
+createOutputs(FlatbufferBuilder &builder, ValueRange columns) {
   SmallVector<iree_hal_strela_OutputColumnDef_ref_t> refs;
-  for (auto column : columns.getAsRange<strela::OutColAttr>()) {
-    auto addressRef = createAddress(builder, column.getAddress());
-    iree_hal_strela_ValueDef_t wordCount = immediate(column.getWords());
+  for (Value column : columns) {
+    auto columnOp = column.getDefiningOp<strela::OutColumnOp>();
+    strela::ColumnAddress address;
+    uint32_t binding = 0, words = 0;
+    if (!columnOp.isUnused()) {
+      FailureOr<strela::ColumnAddress> folded = strela::getColumnAddress(columnOp);
+      if (failed(folded)) return failure();
+      address = *folded;
+      binding = *columnOp.getBinding();
+      words = *columnOp.getWords();
+    }
+    auto addressRef = createAddress(builder, binding, address);
+    iree_hal_strela_ValueDef_t wordCount = immediate(words);
     iree_hal_strela_OutputColumnDef_start(builder);
     iree_hal_strela_OutputColumnDef_address_add(builder, addressRef);
     iree_hal_strela_OutputColumnDef_word_count_add(builder, &wordCount);
@@ -99,7 +114,8 @@ static IREE::HAL::ExecutableTargetAttr
 getStrelaExecutableTarget(MLIRContext *context, const EstelaOptions &options) {
   Builder b(context);
   auto desc = strela::TargetDescAttr::get(
-    context, options.rows, options.columns, options.maxColumnWords
+    context, options.rows, options.columns, options.maxColumnWords,
+    options.multiplierWidth
   );
   NamedAttribute config(b.getStringAttr(strela::targetDescKey), desc);
   return b.getAttr<IREE::HAL::ExecutableTargetAttr>(
@@ -125,30 +141,70 @@ StrelaTargetBackend::getDependentDialects(DialectRegistry &registry) const {
   registry.insert<strela::StrelaDialect>();
 }
 
+// To configure the `hal.executable.variant` op contents for translation we need
+// to convert the content to an explicit matrix multiplication and attach a
+// lowering_config with tile_sizes to later tile it via workgroups.
+void
+StrelaTargetBackend::buildConfigurationPassPipeline(
+  IREE::HAL::ExecutableTargetAttr executableTargetAttr,
+  OpPassManager &passManager
+) {
+  buildCodegenConfigurationPreProcessingPassPipeline(passManager);
+  OpPassManager &modulePassManager = passManager.nest<ModuleOp>();
+  modulePassManager.addNestedPass<func::FuncOp>(
+    // NOTE(Diego): StrelaSelectLoweringStrategy is a misleading name.
+    estela::createStrelaSelectLoweringStrategyPass()
+  );
+  modulePassManager.addPass(createFoldReshapeIntoInterfaceTensorPass());
+  modulePassManager.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+}
+
 void
 StrelaTargetBackend::buildTranslationPassPipeline(
   IREE::HAL::ExecutableTargetAttr executableTargetAttr,
   OpPassManager &passManager
 ) {
-  passManager.nest<ModuleOp>().addNestedPass<func::FuncOp>(
+  OpPassManager &modulePassManager = passManager.nest<ModuleOp>();
+
+  // One workgroup per job: the tile offsets become arithmetic on the
+  // workgroup ids, and the workgroup count (ceildiv(F, 3), N, 1) comes out of
+  // the forall bounds.
+  modulePassManager.addNestedPass<func::FuncOp>(
+    createTileAndDistributeToWorkgroupsUsingForallOpPass()
+  );
+  modulePassManager.addNestedPass<func::FuncOp>(
+    estela::createStrelaStoreWorkgroupTilesPass()
+  );
+  // Rows and feature triples stay on workgroup ids y and x: linearizing them
+  // onto x (the default) would need a div/mod a column address can't hold.
+  ReconcileTranslationInfoPassOptions reconcileOptions{
+    .distributeAlong = IREE::Codegen::WorkgroupId::IdY,
+  };
+  modulePassManager.addPass(createReconcileTranslationInfoPass(reconcileOptions));
+  modulePassManager.addPass(createResolveWorkgroupCountHintsPass());
+  modulePassManager.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+  modulePassManager.addNestedPass<func::FuncOp>(createCSEPass());
+
+  // Every job runs a whole tile; canonicalize then makes the tile shapes
+  // static, which ConvertLinalgToStrela needs.
+  modulePassManager.addNestedPass<func::FuncOp>(
+    estela::createStrelaOverlapLastTilePass()
+  );
+  modulePassManager.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+  modulePassManager.addNestedPass<func::FuncOp>(createCSEPass());
+
+  modulePassManager.addNestedPass<func::FuncOp>(
     estela::createConvertLinalgToStrelaPass()
   );
 
-  // Simplifies away {collapse,expand}_shape introduced by
-  // createConvertLinalgToStrelaPass.
-  // NOTE: maybe it is better to do it in the preprocessing and
-  // global-optimization takes care of it?
-  passManager.addPass(createFoldReshapeIntoInterfaceTensorPass());
-
-  // Needs the workload ordinals MaterializeBindings erases. A second nest,
-  // because adding to the first module pipeline would run before this.
-  passManager.addPass(estela::createResolveWorkgroupCountPass());
-
-  // Resolve the dispatch interface while the full executable source is still
-  // around, and leave the answer in the IR as a strela.job.
-  passManager.nest<ModuleOp>().addNestedPass<func::FuncOp>(
-    estela::createMaterializeBindingsPass()
+  // The dispatch interface becomes strela.* ops, and the kernel with its loads
+  // and store a strela.job whose column addresses stay SSA until the
+  // serializer folds them.
+  modulePassManager.addNestedPass<func::FuncOp>(
+    estela::createConvertToStrelaABIPass()
   );
+
+  buildCodegenTranslationPostProcessingPassPipeline(passManager);
 }
 
 void
@@ -200,14 +256,18 @@ StrelaTargetBackend::serializeExecutable(
     SmallVector<uint32_t> bitstream(jobOp->getBitstream());
     auto bitstreamRef =
         flatbuffers_uint32_vec_create(builder, bitstream.data(), bitstream.size());
-    flatbuffers_vec_ref_t inputsRef = createInputs(builder, jobOp->getInputs());
-    flatbuffers_vec_ref_t outputsRef = createOutputs(builder, jobOp->getOutputs());
+    FailureOr<flatbuffers_vec_ref_t> inputsRef =
+        createInputs(builder, jobOp->getInputs());
+    if (failed(inputsRef)) return failure();
+    FailureOr<flatbuffers_vec_ref_t> outputsRef =
+        createOutputs(builder, jobOp->getOutputs());
+    if (failed(outputsRef)) return failure();
 
     iree_hal_strela_ExportDef_start(builder);
     iree_hal_strela_ExportDef_name_add(builder, nameRef);
     iree_hal_strela_ExportDef_bitstream_add(builder, bitstreamRef);
-    iree_hal_strela_ExportDef_inputs_add(builder, inputsRef);
-    iree_hal_strela_ExportDef_outputs_add(builder, outputsRef);
+    iree_hal_strela_ExportDef_inputs_add(builder, *inputsRef);
+    iree_hal_strela_ExportDef_outputs_add(builder, *outputsRef);
     iree_hal_strela_ExportDef_constant_count_add(
       builder, static_cast<uint32_t>(layoutAttr.getConstants())
     );

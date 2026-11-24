@@ -16,10 +16,12 @@ iree_cc_library(
   SRCS
     "AssignTopologyPass.cpp"
     "ConvertLinalgToStrelaPass.cpp"
+    "ConvertToStrelaABIPass.cpp"
     "LinkExecutablesPass.cpp"
-    "MaterializeBindingsPass.cpp"
-    "NormalizeRescalePass.cpp"
-    "ResolveWorkgroupCountPass.cpp"
+    "StrelaOverlapLastTilePass.cpp"
+    "StrelaPrepareWeightsPass.cpp"
+    "StrelaSelectLoweringStrategyPass.cpp"
+    "StrelaStoreWorkgroupTilesPass.cpp"
     "TransferWrapPass.cpp"
   INCLUDES
     # Passes.h.inc lands next to the sources in the build tree and is included
@@ -30,6 +32,7 @@ iree_cc_library(
     iree::..::..::compiler::src::estela::defs
     iree::..::..::compiler::src::estela::StrelaIR::IR
     iree::..::..::compiler::src::estela::Utils::Utils
+    iree::compiler::Codegen::Dialect::Codegen::IR::IREECodegenDialect
     iree::compiler::Codegen::Utils
     iree::compiler::Dialect::Flow::IR
     iree::compiler::Dialect::HAL::IR
@@ -37,7 +40,9 @@ iree_cc_library(
     iree::compiler::Dialect::TensorExt::IR
     iree::compiler::Dialect::Util::IR
     iree::compiler::Utils
+    MLIRAffineDialect
     MLIRArithDialect
+    MLIRArithUtils
     MLIRFuncDialect
     MLIRIR
     MLIRLinalgDialect
@@ -47,7 +52,7 @@ iree_cc_library(
     MLIRSCFDialect
     MLIRSupport
     MLIRTensorDialect
-    MLIRTosaDialect
+    MLIRTransformUtils
     MLIRTransforms
   PUBLIC
 )

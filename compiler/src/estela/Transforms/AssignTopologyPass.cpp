@@ -53,14 +53,21 @@ struct AssignTopologyPass final
         "the option --iree-hal-target-device=cpu0=local[0] option.";
     }
 
-    // Other devices can access STRELA memory but not the contrary.
+    // Other devices can access STRELA memory but not the contrary. Both ways
+    // the data stays where it is: what the host produces for STRELA goes into
+    // a buffer allocated for both devices (the STRELA allocator, with
+    // --device_lead_allocator), which the host writes and STRELA reads in
+    // place, so Stream needs no staging copy. An imported input can reach a
+    // STRELA dispatch directly too: the harness must then allocate it from the
+    // STRELA allocator (iree-run-module does with --device_lead_allocator=1),
+    // or the HAL rejects the binding as memory STRELA can't reach.
     MLIRContext *context = &getContext();
     SmallVector<IREE::HAL::DeviceLinkAttr> links;
     for (auto strela : strelaDevices) {
       for (auto other : otherDevices) {
         links.push_back(IREE::HAL::DeviceLinkAttr::get(
             context, other, strela, /*unified_memory=*/false,
-            /*transparent_access=*/false, /*extra_properties=*/{}));
+            /*transparent_access=*/true, /*extra_properties=*/{}));
         // The host reads STRELA memory in place: elide the copies out of it.
         links.push_back(IREE::HAL::DeviceLinkAttr::get(
             context, strela, other, /*unified_memory=*/false,

@@ -481,8 +481,8 @@ iree_hal_strela_command_buffer_dispatch(
   // an output may be written back over what the device puts there later.
   for (size_t c = 0; iree_status_is_ok(status) && c < IREE_HAL_STRELA_COLUMN_COUNT; ++c) {
     if (inputs[c].buffer) {
-      status = iree_hal_strela_buffer_flush_range(
-        &inputs[c].buffer->base, inputs[c].offset, inputs[c].length
+      status = iree_hal_strela_buffer_flush_input(
+        inputs[c].buffer, inputs[c].offset, inputs[c].length
       );
     }
     if (iree_status_is_ok(status) && outputs[c].buffer) {

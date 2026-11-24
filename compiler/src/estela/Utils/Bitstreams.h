@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 
 namespace mlir::estela {
 
@@ -67,6 +68,40 @@ inline constexpr std::array<uint32_t, strelaBitstreamWords> matvecBitstream(uint
   k[19] = k[39] = k[59] = k[79] = 0;                         // PE 0-3 constants (zero points)
   k[27] = k[47] = k[67] = (uint32_t(inChan) << 16) | 0x0080; // PE 9-11 accumulation length
   return k;
+}
+
+// What one DMA column of a kernel moves: words of one operand, starting at an
+// element and following one of its dimensions.
+struct KernelColumn {
+  enum Operand { Lhs, Rhs, Result };
+  Operand operand;
+  // The element index of the first word.
+  std::array<int64_t, 2> start;
+  // The dimension the words follow, all of it; none for a single word.
+  std::optional<unsigned> walk;
+};
+
+// The columns of a kernel in hardware order; nullopt marks an unused one.
+struct KernelColumns {
+  std::array<std::optional<KernelColumn>, strelaKernelColumns> inputs;
+  std::array<std::optional<KernelColumn>, strelaKernelColumns> outputs;
+};
+
+// The matvec: input column 0 reads the row, input columns 1-3 read the
+// weights of features k = 0..2, output columns 1-3 write result element k of
+// the row. Output column 0 is unused. The weights of feature k are column k of
+// rhs[C, F] (C words, a row of F apart), or row k of rhs[F, C] when the weights
+// are transposed (C contiguous words).
+inline KernelColumns matvecColumns(bool weightsTransposed) {
+  KernelColumns columns;
+  columns.inputs[0] = KernelColumn{KernelColumn::Lhs, {0, 0}, 1};
+  for (int64_t k = 0; k < strelaMatvecFeaturesPerJob; ++k) {
+    columns.inputs[1 + k] = weightsTransposed
+      ? KernelColumn{KernelColumn::Rhs, {k, 0}, 1}
+      : KernelColumn{KernelColumn::Rhs, {0, k}, 0};
+    columns.outputs[1 + k] = KernelColumn{KernelColumn::Result, {0, k}, std::nullopt};
+  }
+  return columns;
 }
 
 } // namespace mlir::estela

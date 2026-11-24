@@ -13,6 +13,7 @@ void StrelaDialect::initialize() {
 #include "StrelaOps.cpp.inc"
   >();
   registerAttributes();
+  registerTypes();
 }
 
 } // namespace mlir::strela

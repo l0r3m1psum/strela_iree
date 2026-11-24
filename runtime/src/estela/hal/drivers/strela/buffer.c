@@ -6,6 +6,11 @@ typedef struct iree_hal_strela_buffer_t {
   strela_buffer s_buf;
   void *host_ptr; // NOTE: I don't think that this is needed since STRELA does not have a separate virtual memory
 
+  // An immutable buffer (IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE: a constant,
+  // such as the weights) has been flushed whole since it was initialized, so
+  // dispatches reading it need not flush it again.
+  bool immutable_flushed;
+
   iree_hal_buffer_release_callback_t release_callback;
 } iree_hal_strela_buffer_t;
 
@@ -78,6 +83,7 @@ iree_hal_strela_buffer_wrap(
     buffer->dev = dev;
     buffer->s_buf = s_buf;
     buffer->host_ptr = host_ptr;
+    buffer->immutable_flushed = false;
     buffer_base = &buffer->base;
   }
 
@@ -205,6 +211,39 @@ iree_hal_strela_buffer_flush_range(
   iree_hal_strela_buffer_lines(local_byte_offset, local_byte_length, &offset, &count);
   strela_buffer_flush(buffer->dev, buffer->s_buf, offset, count);
   return iree_hal_strela_status_from_dev(buffer->dev, "flushing a STRELA buffer");
+}
+
+// Makes what the CPU wrote to the bytes a dispatch reads visible to the device.
+// An immutable buffer is flushed whole the first time and never again: its
+// contents don't change once initialized, and initialization is over before a
+// dispatch reads it.
+static iree_status_t
+iree_hal_strela_buffer_flush_input(
+  iree_hal_strela_buffer_t *buffer,
+  iree_device_size_t local_byte_offset,
+  iree_device_size_t local_byte_length
+) {
+  iree_status_t status = iree_ok_status();
+  iree_hal_buffer_usage_t buffer_usage = iree_hal_buffer_allowed_usage(&buffer->base);
+  bool immutable = iree_all_bits_set(buffer_usage, IREE_HAL_BUFFER_USAGE_SHARING_IMMUTABLE);
+  iree_device_size_t full_size = iree_hal_buffer_allocation_size(&buffer->base);
+  iree_device_size_t byte_offset = immutable ? 0 : local_byte_offset;
+  iree_device_size_t byte_length = immutable ? full_size : local_byte_length;
+
+  // fully_flushed_when_immutable
+  // immutable_flushed implies immutable.
+  IREE_ASSERT(!buffer->immutable_flushed || immutable);
+
+  if (!buffer->immutable_flushed) {
+    status = iree_hal_strela_buffer_flush_range(
+      &buffer->base, byte_offset, byte_length
+    );
+    if (immutable && iree_status_is_ok(status)) {
+      buffer->immutable_flushed = true;
+    }
+  }
+
+  return status;
 }
 
 // The STRELA buffer behind |base_buffer| and the word its byte |offset| falls

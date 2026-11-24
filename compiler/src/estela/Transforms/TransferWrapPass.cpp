@@ -1,4 +1,5 @@
 #include "estela/Transforms/Passes.h"
+#include "estela/Utils/ElementRange.h"
 #include "estela/Utils/Finders.h"
 #include "estela/Utils/StrelaContraction.h"
 
@@ -116,9 +117,13 @@ struct TransferWrapPass final
     // for not it is good enough.
     pinAbiToDefaultDevice(funcOp);
 
+    // A contraction the kernel can run, whose operands are proven to fit the
+    // multipliers. The proof is only possible here: in the backend every
+    // operand is a load from a binding, so it trusts what is pinned now.
     SmallVector<linalg::LinalgOp> candidates;
     funcOp.walk([&candidates,&desc](linalg::LinalgOp op) {
-      if (succeeded(estela::matchStrelaContraction(op, desc))) {
+      if (succeeded(estela::matchStrelaContraction(op, desc)) &&
+          estela::operandsFitMultiplier(op, desc)) {
         candidates.push_back(op);
       }
     });

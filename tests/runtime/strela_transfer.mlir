@@ -14,7 +14,7 @@
 // to the STRELA dispatch; the HAL rejects that. See strela_ops.mlir for the
 // links used here and for --device_lead_allocator.
 //
-// RUN: iree-compile --iree-plugin=estela \
+// RUN: iree-compile --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-execution-model=async-external \
 // RUN:   --iree-hal-target-device=device_a=local[0] \
 // RUN:   --iree-hal-target-device=device_b=strela \
@@ -22,18 +22,22 @@
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --compile-to=executable-targets %s | FileCheck %s
 //
-// RUN: iree-compile --iree-plugin=estela \
+// RUN: iree-compile --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-execution-model=async-external \
 // RUN:   --iree-hal-target-device=device_a=local[0] \
 // RUN:   --iree-hal-target-device=device_b=strela \
 // RUN:   --iree-hal-default-device=device_a \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   %s -o /dev/null
+//
+// The inputs are i32 of unknown range, which the operand-width check keeps on
+// the host: --iree-strela-multiplier-width=32 lifts it (operand_width.mlir
+// tests it).
 
 // The add and the ReLU stay on the CPU: STRELA only runs the matvec.
+// CHECK:     strela.inp_column {{.+}} words(16) stride(1)
+// CHECK:     strela.inp_column {{.+}} words(16) stride(9)
 // CHECK:     strela.job
-// CHECK-SAME:  inputs([#strela.inp_col<{{[^#]*}}words = 16, stride = 1>,
-// CHECK-SAME:          #strela.inp_col<{{[^#]*}}words = 16, stride = 9>,
 // CHECK-NOT: strela.job
 
 module attributes {

@@ -7,11 +7,14 @@ iree_lit_test_suite(
   NAME
     lit
   SRCS
-    "resolve_workgroup_count.mlir"
     "link_executables.mlir"
-    "materialize_bindings.mlir"
+    "convert_to_strela_abi.mlir"
     "transfer_wrap.mlir"
     "convert_linalg_to_strela.mlir"
+    "prepare_weights.mlir"
+    "fold_bias.mlir"
+    "select_lowering_strategy.mlir"
+    "workgroup_tiling.mlir"
   TOOLS
     FileCheck
     iree-opt

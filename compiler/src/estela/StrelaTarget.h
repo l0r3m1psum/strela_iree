@@ -22,6 +22,11 @@ struct StrelaTargetBackend : public iree_compiler::IREE::HAL::TargetBackend {
 
   void getDependentDialects(DialectRegistry &registry) const override;
 
+  void buildConfigurationPassPipeline(
+    iree_compiler::IREE::HAL::ExecutableTargetAttr executableTargetAttr,
+    OpPassManager &passManager
+  ) override;
+
   void buildTranslationPassPipeline(
     iree_compiler::IREE::HAL::ExecutableTargetAttr executableTargetAttr,
     OpPassManager &passManager
