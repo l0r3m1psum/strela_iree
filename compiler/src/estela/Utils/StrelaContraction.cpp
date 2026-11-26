@@ -48,7 +48,7 @@ filterBatchDims(ArrayRef<AffineExpr> mapResults, ArrayRef<unsigned> batch) {
 // as a reshape -> matmul -> reshape)
 FailureOr<StrelaMatvecShape>
 matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc,
-                       bool asIfTransposed) {
+                       bool asIfTransposed, bool asIfWidened) {
   if (!desc || desc.getRows() != strelaKernelRows
       || desc.getColumns() != strelaKernelColumns) {
     return failure();
@@ -58,8 +58,14 @@ matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc,
   FailureOr<linalg::ContractionDimensions> dims = matchContraction(op);
   if (failed(dims)) return failure();
 
+  // The kernel moves i32 words. Inputs narrower than that are accepted only
+  // when asked as if StrelaWidenOperands had already extended them.
   for (Value value : op->getOperands()) {
-    if (!getElementTypeOrSelf(value.getType()).isInteger(32)) return failure();
+    Type type = getElementTypeOrSelf(value.getType());
+    bool narrowInput = asIfWidened && type.isSignlessInteger()
+                       && type.getIntOrFloatBitWidth() < 32
+                       && llvm::is_contained(op.getDpsInputs(), value);
+    if (!type.isInteger(32) && !narrowInput) return failure();
   }
 
   SmallVector<int64_t> ranges = op.getStaticLoopRanges();
@@ -78,7 +84,7 @@ matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc,
   // lhs (n, c), rhs (c, f) and out (n, f), without n when M is empty. That
   // is, the activations (lhs) are C-contiguous, the result (out) F-contiguous.
   // The weights (rhs) are either F-contiguous (c, f), as TOSA has them, or
-  // C-contiguous (f, c), as StrelaPrepareWeights transposes constant ones.
+  // C-contiguous (f, c), as IREE's TransposeMatmul transposes them.
   SmallVector<unsigned> lhs, out;
   if (!dims->m.empty()) {
     lhs.push_back(dims->m[0]);

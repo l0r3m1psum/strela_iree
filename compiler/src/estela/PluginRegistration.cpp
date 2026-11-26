@@ -1,10 +1,15 @@
 #include "iree/compiler/Dialect/HAL/Target/TargetBackend.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetDevice.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetRegistry.h"
+#include "iree/compiler/Dialect/Util/IR/UtilOps.h"
+#include "iree/compiler/GlobalOptimization/Passes.h"
 #include "iree/compiler/PluginAPI/Client.h"
+#include "iree/compiler/Preprocessing/Common/Passes.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
 
 #include "estela/StrelaOptions.h"
 #include "estela/StrelaIR/StrelaDialect.h"
@@ -37,12 +42,6 @@ EstelaOptions::bindOptions(OptionsBinder &binder) {
                    "contraction is offloaded only if its operands are proven "
                    "to fit.")
   );
-  binder.opt<bool>(
-    "iree-strela-fold-bias", foldBias, llvm::cl::cat(category),
-    llvm::cl::desc("Fold the constant bias of each quantized fully connected "
-                   "layer into its STRELA matmul as extra reduction elements, "
-                   "instead of adding it on the host.")
-  );
 }
 
 namespace {
@@ -73,14 +72,36 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
   void
   extendPreprocessingPassPipeline(OpPassManager &passManager) override {
     passManager.addPass(estela::createAssignTopologyPass());
-    // Zero points folded and constant weights transposed (each quantized fully
-    // connected layer becomes an i32 matmul from a zero fill), then the
-    // matmuls STRELA can run, with operands proven to fit its multipliers,
-    // pinned to it.
-    passManager.addNestedPass<IREE::Util::FuncOp>(
-      estela::createStrelaPrepareWeightsPass({options.foldBias})
+    OpPassManager &funcPassManager = passManager.nest<IREE::Util::FuncOp>();
+    // A quantized fully connected layer (a 1x1 conv_2d_nhwc_hwcf_q) becomes a
+    // linalg.matmul of its i8 operands from a zero fill, then the bias add and
+    // the zero point correction -zx * sum_c w[c, f] on the host, whose sum of
+    // constants const-eval folds. IREE runs the first two in
+    // GlobalOptimization anyway; here they run before STRELA picks its
+    // matmuls.
+    funcPassManager.addPass(
+      GlobalOptimization::createLinalgQuantizedConvToConvPass()
     );
-    passManager.addNestedPass<IREE::Util::FuncOp>(estela::createTransferWrapPass());
+    funcPassManager.addPass(
+      GlobalOptimization::createDetachElementwiseFromNamedOpsPass()
+    );
+    funcPassManager.addPass(
+      Preprocessing::createConvert1X1FilterConv2DToMatmulPass()
+    );
+    funcPassManager.addPass(createLinalgFoldUnitExtentDimsPass());
+    funcPassManager.addPass(createCanonicalizerPass());
+    funcPassManager.addPass(createLinalgSpecializeGenericOpsPass());
+    // The operands of the matmuls STRELA will run widened to i32, the weights
+    // of every matmul transposed to F x C, then the matmuls STRELA can run
+    // pinned to it. With F x C weights each feature's C weights are
+    // contiguous, so a weight column spans C words instead of C * F. Constant
+    // weights are transposed by const-eval; weights computed at run time would
+    // get a transpose at run time too.
+    funcPassManager.addPass(estela::createStrelaWidenOperandsPass());
+    funcPassManager.addPass(Preprocessing::createTransposeMatmulPass(
+      {.input = Preprocessing::TransposeMatmulInput::Rhs}
+    ));
+    funcPassManager.addPass(estela::createTransferWrapPass());
   }
 
   void

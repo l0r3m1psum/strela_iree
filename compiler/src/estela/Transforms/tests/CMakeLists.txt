@@ -11,8 +11,7 @@ iree_lit_test_suite(
     "convert_to_strela_abi.mlir"
     "transfer_wrap.mlir"
     "convert_linalg_to_strela.mlir"
-    "prepare_weights.mlir"
-    "fold_bias.mlir"
+    "widen_operands.mlir"
     "select_lowering_strategy.mlir"
     "workgroup_tiling.mlir"
   TOOLS

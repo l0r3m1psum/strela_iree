@@ -81,7 +81,7 @@ hal.executable private @offsets {
 
 // -----
 
-// F x C weights (StrelaPrepareWeights transposed them): weight column k reads
+// F x C weights (IREE's TransposeMatmul transposed them): weight column k reads
 // row f0 + k, C = 16 contiguous words, at 4C·(f0 + k) = 64·f0 + 64k bytes.
 
 #layout = #hal.pipeline.layout<bindings = [

@@ -12,12 +12,12 @@
 
 // i8 activations widened by tosa.cast (a linalg.generic with arith.extsi once
 // lowered) and constant weights within int16: pinned. Being constant, the
-// weights are also transposed to F x C (StrelaPrepareWeights).
+// weights are also transposed to F x C (IREE's TransposeMatmul).
 
 // CHECK-LABEL: util.func public @widened_i8
 // CHECK:         %[[X:.+]] = flow.tensor.transfer %{{.+}} : tensor<1x4x16xi32> to #hal.device.affinity<@strela0>
 // CHECK:         %[[W:.+]] = flow.tensor.transfer %{{.+}} : tensor<1x3x16xi32> to #hal.device.affinity<@strela0>
-// CHECK:         linalg.generic {{.+}} ins(%[[X]], %[[W]]
+// CHECK:         linalg.batch_matmul indexing_maps = {{.+}} ins(%[[X]], %[[W]]
 func.func @widened_i8(%x8: tensor<1x4x16xi8>) -> tensor<1x4x3xi32> {
   %x = tosa.cast %x8 : (tensor<1x4x16xi8>) -> tensor<1x4x16xi32>
   %w = "tosa.const"() {values = dense<[[[-32768, 0, 32767]]]> : tensor<1x1x3xi32>} : () -> tensor<1x1x3xi32>

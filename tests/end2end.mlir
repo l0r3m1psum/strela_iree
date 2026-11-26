@@ -76,9 +76,13 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // After the input has been lowered to linalg the preprocessing phase follows.
 // We now have to specify devices for executing the various operations, this
 // will become global variables in the module. After this Estela adds the device
-// topology i.e. how STRELA and the CPU can communicate. Then operations
-// supported by STRELA are wrapped in flow.tensor.transfer. The zero fill is
-// left outside the "STRELA region": the kernel computes from zero anyway.
+// topology i.e. how STRELA and the CPU can communicate. The weights of every
+// matmul are transposed to F x C (IREE's TransposeMatmul), so that each
+// feature's weights are contiguous; %w is an input, so the linalg.transpose
+// stays and runs at run time, on the CPU. Then operations supported by STRELA
+// are wrapped in flow.tensor.transfer: it is the transposed %w that moves to
+// STRELA. The zero fill is left outside the "STRELA region": the kernel
+// computes from zero anyway.
 
 // PRE-LABEL: module attributes {
 // PRE-SAME:  stream.affinity.default = #hal.device.affinity<@[[CPU:[a-z0-9_]+]]>
@@ -93,23 +97,26 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // PRE:         %[[X_H:.+]] = hal.tensor.import on(#hal.device.affinity<@[[CPU]]>) %[[X]]
 // PRE:         %[[W_H:.+]] = hal.tensor.import on(#hal.device.affinity<@[[CPU]]>) %[[W]]
 // PRE:         %[[ZERO:.+]] = linalg.fill
+// PRE:         %[[W_T:.+]] = linalg.transpose ins(%[[W_H]] : tensor<1x16x9xi32>) outs(%{{.+}} : tensor<1x9x16xi32>) permutation = [0, 2, 1]
 // PRE:         %[[X_S:.+]] = flow.tensor.transfer %[[X_H]] : tensor<1x?x16xi32>{%{{.+}}} to #hal.device.affinity<@[[STRELA]]>
-// PRE:         %[[W_S:.+]] = flow.tensor.transfer %[[W_H]] : tensor<1x16x9xi32> to #hal.device.affinity<@[[STRELA]]>
+// PRE:         %[[W_S:.+]] = flow.tensor.transfer %[[W_T]] : tensor<1x9x16xi32> to #hal.device.affinity<@[[STRELA]]>
 // PRE:         %[[Y_S:.+]] = linalg.batch_matmul
-// PRE-SAME:      ins(%[[X_S]], %[[W_S]] : tensor<1x?x16xi32>, tensor<1x16x9xi32>)
+// PRE-SAME:      ins(%[[X_S]], %[[W_S]] : tensor<1x?x16xi32>, tensor<1x9x16xi32>)
 // PRE-SAME:      outs(%[[ZERO]] : tensor<1x?x9xi32>)
 // PRE:         %[[Y:.+]] = flow.tensor.transfer %[[Y_S]] : tensor<1x?x9xi32>{%{{.+}}} to #hal.device.affinity<@[[CPU]]>
 // PRE:         %{{.+}} = hal.tensor.export on(#hal.device.affinity<@[[CPU]]>) %[[Y]]
 
 // After preprocessing data flow information is injected in the IR using the
 // flow dialect and linalg computations are grouped in flow.executable. Also the
-// concept work groups appear at this point. Dispatch region formation pulls the
-// zero fill into the dispatch, so there is a single dispatch and nothing runs
-// on the CPU. N reaches the dispatch as workload ordinal 0.
+// concept work groups appear at this point. There are two dispatches: the
+// transpose of %w, on the CPU, and the matvec, into which dispatch region
+// formation pulls the zero fill. N reaches the matvec as workload ordinal 0.
 
 // FLW-LABEL: module attributes {
 // FLW:         util.global private @cpu0 = #hal.device.target<"local", {{.+}}> : !hal.device
 // FLW:         util.global private @strela0 = #hal.device.target<"strela", {{.+}}> : !hal.device
+// FLW:         flow.executable private @[[TRANSPOSE:[a-z0-9_]+]] {
+// FLW:           flow.executable.export public @[[TRANSPOSE_FUNC:[a-zA-Z0-9_]+]] workgroups()
 // FLW:         flow.executable private @[[DISPATCH:[a-z0-9_]+]] {
 // FLW:           flow.executable.export public @[[DISPATCH_FUNC:[a-zA-Z0-9_]+]] workgroups(%{{.+}}: index) -> (index, index, index) {
 // FLW:             %{{.+}}, %{{.+}}, %{{.+}} = iree_tensor_ext.dispatch.workgroup_count_from_slice
@@ -120,34 +127,41 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // FLW:               %{{.+}} = linalg.batch_matmul
 // FLW-SAME:          outs(%[[ZERO]] : tensor<1x?x9xi32>)
 // FLW:         util.func public @matvec(
+// FLW:           %[[W_T:.+]] = flow.dispatch @[[TRANSPOSE]]::@[[TRANSPOSE_FUNC]](%{{.+}}) : (tensor<16x9xi32>) -> tensor<9x16xi32>
 // FLW:           %[[X_S:.+]] = flow.tensor.transfer %{{.+}} to #hal.device.affinity<@strela0>
-// FLW:           %[[W_S:.+]] = flow.tensor.transfer %{{.+}} to #hal.device.affinity<@strela0>
-// FLW:           %[[Y_S:.+]] = flow.dispatch @[[DISPATCH]]::@[[DISPATCH_FUNC]][%{{.+}}](%[[X_S]], %[[W_S]], %{{.+}})
+// FLW:           %[[W_S:.+]] = flow.tensor.transfer %[[W_T]] : tensor<9x16xi32> to #hal.device.affinity<@strela0>
+// FLW:           %[[W_S3:.+]] = flow.tensor.reshape %[[W_S]] : tensor<9x16xi32> -> tensor<1x9x16xi32>
+// FLW:           %[[Y_S:.+]] = flow.dispatch @[[DISPATCH]]::@[[DISPATCH_FUNC]][%{{.+}}](%[[X_S]], %[[W_S3]], %{{.+}})
 // FLW:           %{{.+}} = flow.tensor.transfer %[[Y_S]] : {{.+}} to #hal.device.affinity<@cpu0>
 // TODO: talk about the flow.dispatch.tie_shape
 
 // After the data flow phase the parallelism in the dataflow graph is made
 // explicit with the stream dialect. The topology says each device can work on
 // the other's buffers in place (at run time, buffers STRELA touches come from
-// the STRELA allocator, --device_lead_allocator), so nothing is copied: the
-// dispatch binds the imported %x and %w as they are and writes a buffer
-// allocated for both devices, which the CPU then exports. N reaches the
-// dispatch as two i32 operands, the halves of a 64 bit index.
+// the STRELA allocator, --device_lead_allocator), so nothing is copied: the CPU
+// transposes the imported %w into a transient buffer allocated for both
+// devices, and the matvec binds the imported %x and that buffer as they are and
+// writes a buffer allocated for both devices, which the CPU then exports. N
+// reaches the matvec as two i32 operands, the halves of a 64 bit index.
 
 // STM-LABEL: module attributes {
 // STM:         util.global private @[[CPU:[a-z0-9_]+]] = #hal.device.target<"local"
 // STM:         util.global private @[[STRELA:[a-z0-9_]+]] = #hal.device.target<"strela"
+// STM:         stream.executable private @[[TRANSPOSE:[a-z0-9_]+]] {
 // STM:         stream.executable private @[[DISPATCH:[a-z0-9_]+]] {
 // STM:           builtin.module {
 // STM:             func.func @[[DISPATCH_FUNC:[a-zA-Z0-9_]+]](%{{.+}}: !stream.binding {{.+}}, %{{.+}}: !stream.binding {{.+}}, %{{.+}}: !stream.binding {{.+}}, %{{.+}}: i32, %{{.+}}: i32) {
-// STM:               stream.binding.subspan %{{.+}}[%c0] : !stream.binding -> !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16x9xi32>>
+// STM:               stream.binding.subspan %{{.+}}[%c0] : !stream.binding -> !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x9x16xi32>>
 // STM:               stream.binding.subspan %{{.+}}[%c0] : !stream.binding -> !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x?x16xi32>>
 // STM:               %{{.+}} = linalg.batch_matmul
 // STM:         util.func public @matvec(%[[X:[^:]+]]: !hal.buffer_view, %[[W:[^:]+]]: !hal.buffer_view)
 // STM:           %[[X_R:.+]] = stream.tensor.import on(#hal.device.affinity<@[[CPU]]>) %[[X]] : !hal.buffer_view -> tensor<1x?x16xi32>{%{{.+}}}
 // STM:           %[[W_R:.+]] = stream.tensor.import on(#hal.device.affinity<@[[CPU]]>) %[[W]] : !hal.buffer_view -> tensor<1x16x9xi32>
-// STM:           %{{.+}}, %{{.+}} = stream.resource.alloca uninitialized on(#hal.device.optimal<[#hal.device.affinity<@[[CPU]]>, #hal.device.affinity<@[[STRELA]]>]>) : !stream.resource<external>
-// STM:           %{{.+}} = stream.cmd.execute on(#hal.device.affinity<@[[STRELA]]>) {{.+}} with(%[[X_R]] as %[[X_A:[^:]+]]: {{.+}}, %[[W_R]] as %[[W_A:[^:]+]]: {{.+}}, %{{.+}} as %[[Y_A:[^:]+]]:
+// STM:           %[[W_T:[^,]+]], %{{.+}} = stream.resource.alloca uninitialized on(#hal.device.optimal<[#hal.device.affinity<@[[CPU]]>, #hal.device.affinity<@[[STRELA]]>]>) : !stream.resource<transient>
+// STM:           %{{.+}} = stream.cmd.execute on(#hal.device.affinity<@[[CPU]]>) {{.+}} with(%[[W_R]] as %{{.+}}, %[[W_T]] as
+// STM:             stream.cmd.dispatch @[[TRANSPOSE]]::
+// STM:           %{{.+}}, %{{.+}} = stream.resource.alloca uninitialized on(#hal.device.optimal<[#hal.device.affinity<@[[CPU]]>, #hal.device.affinity<@[[STRELA]]>]>) {{.+}} !stream.resource<external>
+// STM:           %{{.+}} = stream.cmd.execute on(#hal.device.affinity<@[[STRELA]]>) {{.+}} with(%[[X_R]] as %[[X_A:[^:]+]]: {{.+}}, %[[W_T]] as %[[W_A:[^:]+]]: {{.+}}, %{{.+}} as %[[Y_A:[^:]+]]:
 // STM-NOT:         stream.cmd.copy
 // STM:             stream.cmd.dispatch @[[DISPATCH]]::@[[DISPATCH_FUNC]][%{{.+}}](%{{.+}}, %{{.+}} : i32, i32) {
 // STM-NEXT:          ro %[[X_A]]
@@ -163,10 +177,10 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // strela.job: the bitstream and the 4 input and 4 output DMA columns. With
 // --iree-stream-resource-index-bits=32 N is a single push constant, which only
 // the count uses. Workgroup (x, y) runs row y and features 3x .. 3x + 2: the
-// row at byte 4C·y of binding 0, %x (input column 0), the weights at byte 12x
-// of binding 1, %w (input columns 1-3, 4 bytes apart, C = 16 words F = 9
-// apart), and the result at 4F·y + 12x of binding 2 (output column 0 unused,
-// 1-3 used).
+// row at byte 4C·y of binding 0, %x (input column 0), the weights at byte
+// 4C·3x = 192x of binding 1, the transposed %w (input columns 1-3, a row of
+// C = 16 contiguous words each, 64 bytes apart), and the result at 4F·y + 12x
+// of binding 2 (output column 0 unused, 1-3 used).
 
 // EXC-LABEL: module attributes {stream.affinity.default
 // EXC:         hal.executable private @{{.+}} {
@@ -180,12 +194,12 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 // EXC-NEXT:              %[[WG_X:[^ ]+]] = strela.workgroup_id[0] : index
 // EXC-NEXT:              %[[A0:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 64)>()[%[[WG_Y]]]
 // EXC-NEXT:              strela.inp_column binding(0) address(%[[A0]]) words(16) stride(1)
-// EXC-NEXT:              %[[A1:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12)>()[%[[WG_X]]]
-// EXC-NEXT:              strela.inp_column binding(1) address(%[[A1]]) words(16) stride(9)
-// EXC-NEXT:              %[[A2:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12 + 4)>()[%[[WG_X]]]
-// EXC-NEXT:              strela.inp_column binding(1) address(%[[A2]]) words(16) stride(9)
-// EXC-NEXT:              %[[A3:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 12 + 8)>()[%[[WG_X]]]
-// EXC-NEXT:              strela.inp_column binding(1) address(%[[A3]]) words(16) stride(9)
+// EXC-NEXT:              %[[A1:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 192)>()[%[[WG_X]]]
+// EXC-NEXT:              strela.inp_column binding(1) address(%[[A1]]) words(16) stride(1)
+// EXC-NEXT:              %[[A2:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 192 + 64)>()[%[[WG_X]]]
+// EXC-NEXT:              strela.inp_column binding(1) address(%[[A2]]) words(16) stride(1)
+// EXC-NEXT:              %[[A3:[^ ]+]] = affine.apply affine_map<()[s0] -> (s0 * 192 + 128)>()[%[[WG_X]]]
+// EXC-NEXT:              strela.inp_column binding(1) address(%[[A3]]) words(16) stride(1)
 // EXC-NEXT:              strela.out_column unused
 // EXC-NEXT:              %[[R1:[^ ]+]] = affine.apply affine_map<()[s0, s1] -> (s0 * 36 + s1 * 12)>()[%[[WG_Y]], %[[WG_X]]]
 // EXC-NEXT:              strela.out_column binding(2) address(%[[R1]]) words(1)
@@ -210,7 +224,7 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor<1x?x
 //
 // Operands are copied into STRELA memory (the topology says STRELA cannot read
 // the CPU's), the dispatch runs the matvec bitstream as 3 jobs, each with the
-// row on input column 0 and three columns of %w on inputs 1-3, and the results
+// row on input column 0 and three rows of the transposed %w on inputs 1-3, and the results
 // come back from output columns 1-3. See strela_ops.mlir for the topology and
 // --device_lead_allocator.
 
@@ -266,22 +280,27 @@ func.func @matvec_relu(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor
 
 // Compile time constants do not need to be "imported" from hal.buffer_view
 // since they are already in a standard MLIR type. Only the matvec is wrapped in
-// transfers; the ReLU takes the result after it has come back to the CPU.
+// transfers; the ReLU takes the result after it has come back to the CPU. The
+// frontend (frontend.mlir) drops the ReLU's unit dims and names it: a
+// linalg.elementwise against the scalar zero.
 
 // PRE-LABEL: module attributes {
 // PRE:         util.func public @matvec_relu(%{{.+}}: !hal.buffer_view, %{{.+}}: !hal.buffer_view) -> !hal.buffer_view
-// PRE:           %[[CST:.+]] = arith.constant dense<0> : tensor<1x1x1xi32>
+// PRE:           %[[CST:.+]] = arith.constant dense<0> : tensor<i32>
 // PRE-NOT:       hal.tensor.import {{.+}} %[[CST]]
 // PRE:           %[[Y_S:.+]] = linalg.batch_matmul
 // PRE:           %[[Y:.+]] = flow.tensor.transfer %[[Y_S]] : {{.+}} to #hal.device.affinity<@cpu0>
 // PRE-NOT:       flow.tensor.transfer
-// PRE:           linalg.generic {{.+}} ins(%[[Y]], %[[CST]] : tensor<1x?x9xi32>, tensor<1x1x1xi32>)
-// PRE:             arith.maxsi
+// PRE:           %[[Y2:.+]] = tensor.collapse_shape %[[Y]]
+// PRE:           linalg.elementwise <max_signed> {{.+}} ins(%[[Y2]], %[[CST]] : tensor<?x9xi32>, tensor<i32>)
 
 // During dispatch creation (--compile-to=dispatch-creation) the ReLU gets a
 // dispatch of its own, and its scalar zero is copied inside the executable.
+// As in @matvec, the transpose of %w is a CPU dispatch before the matvec.
 
 // FLW-LABEL: module attributes {
+// FLW:         flow.executable private @{{[a-z0-9_]+}} {
+// FLW:             func.func @{{[a-z0-9_]+}}_transpose_{{[a-zA-Z0-9_]+}}(
 // FLW:         flow.executable private @[[MATVEC:[a-z0-9_]+]] {
 // FLW:             func.func @{{[a-z0-9_]+}}_batch_matmul_{{[a-zA-Z0-9_]+}}(
 // FLW:               linalg.batch_matmul
@@ -303,7 +322,7 @@ func.func @matvec_relu(%x: tensor<1x?x16xi32>, %w: tensor<1x16x9xi32>) -> tensor
 // EXC:         hal.executable private @{{.+}} {
 // EXC:           hal.executable.variant public @strela_bitstream
 // EXC:                 strela.inp_column {{.+}} words(16) stride(1)
-// EXC:                 strela.inp_column {{.+}} words(16) stride(9)
+// EXC:                 strela.inp_column {{.+}} words(16) stride(1)
 // EXC:                 strela.job
 // EXC:         hal.executable private @{{.+}} {
 // EXC:           hal.executable.variant public @vmvx_bytecode_fb
@@ -331,21 +350,23 @@ func.func @matvec_const_weights(%x: tensor<1x1x16xi32>) -> tensor<1x1x3xi32> {
 // INP:           %[[W:.+]] = arith.constant dense<{{.+}}> : tensor<1x16x3xi32>
 // INP:           %{{.+}} = linalg.batch_matmul ins(%[[X]], %[[W]] : tensor<1x1x16xi32>, tensor<1x16x3xi32>)
 
-// Being constant, the weights are transposed to F x C at preprocessing
-// (StrelaPrepareWeights), so that each feature's weights are contiguous, and
-// const-eval folds the transpose: the global holds the 3 x 16 weights and
-// nothing is transposed at run time. The global is loaded and transferred to
-// STRELA like any other operand. (The contraction is a linalg.generic now, so
-// FoldUnitExtentDims drops its unit dims.)
+// The weights are transposed to F x C at preprocessing (IREE's
+// TransposeMatmul, MLIR's transposeBatchMatmul), so that each feature's
+// weights are contiguous, and being constant const-eval folds the transpose: the
+// global holds the 3 x 16 weights and nothing is transposed at run time. The
+// global is loaded and transferred to STRELA like any other operand. The
+// contraction stays a named linalg.batch_matmul (with the transposed-B map),
+// so the dispatch keeps its unit dims; the backend's lowering strategy
+// reshapes it to the kernel's matmul.
 
 // FLW-LABEL: module attributes {
 // FLW:         util.global private @[[CONST_GLOB:[a-z0-9_]+]] {{.+}} = dense<{{\[}}[0, 3, 6, 9, {{.+}}]]> : tensor<3x16xi32>
 // FLW:         flow.executable private @{{[a-z0-9_]+}} {
 // FLW:           builtin.module {
 // FLW:             func.func @{{[a-zA-Z0-9_]+}}(
-// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<16xi32>>,
-// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<3x16xi32>>,
-// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<writeonly:tensor<3xi32>>
+// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x1x16xi32>>,
+// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x3x16xi32>>,
+// FLW-SAME:        %{{[a-z0-9]+}}: !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x1x3xi32>>
 // FLW-SAME:        ) {
 // FLW:         util.func public @matvec_const_weights(%{{.+}}: !hal.buffer_view) {{.+}} {
 // FLW:           %[[CONST_LOC:.+]] = util.global.load immutable @[[CONST_GLOB]] : tensor<3x16xi32>
@@ -367,9 +388,8 @@ func.func @matvec_const_weights(%x: tensor<1x1x16xi32>) -> tensor<1x1x3xi32> {
 
 // This is, strictly speaking not valid TOSA (because tosa.matmul does not
 // support int32). TOSA matmul is also necessarily a batched matrix
-// multiplication hence the reshape. Note that the the weight is not x128x128
-// because otherwise it would exceed the limit of the stride being strictly less
-// then 128*128 = 16384.
+// multiplication hence the reshape. The weights come in F x C and the model
+// transposes them to C x F itself (the tosa.transpose).
 
 func.func @matmul_bias(%act: tensor<?x64xi32>, %wgt: tensor<128x64xi32>) -> (tensor<?x128xi32>) {
   %act_shape = tosa.const_shape values(dense<[1, -1, 64]> : tensor<3xindex>) : () -> !tosa.shape<3>
@@ -419,29 +439,38 @@ func.func @matmul_bias(%act: tensor<?x64xi32>, %wgt: tensor<128x64xi32>) -> (ten
 // INP:           util.return %[[OUT]]
 
 // linalg.batch_matmul is wrapped in transfers except for the accumulator
-// (linalg.fill) which is left untouched.
+// (linalg.fill) which is left untouched. The frontend transposes the weights
+// back to F x C (IREE's TransposeMatmul), undoing the model's transpose.
 
 // PRE-LABEL: module attributes {
 // PRE:          util.func public @matmul_bias
+// PRE:            %[[WGT_T:.+]] = linalg.transpose ins(%{{.+}} : tensor<1x128x64xi32>) outs(%{{.+}} : tensor<1x64x128xi32>) permutation = [0, 2, 1]
 // PRE:            %[[ACC:.+]] = linalg.fill
+// PRE:            %[[WGT_TT:.+]] = linalg.transpose ins(%[[WGT_T]] : tensor<1x64x128xi32>) outs(%{{.+}} : tensor<1x128x64xi32>) permutation = [0, 2, 1]
 // PRE:            %[[LHS:.+]] = flow.tensor.transfer
-// PRE:            %[[WGT:.+]] = flow.tensor.transfer
+// PRE:            %[[WGT:.+]] = flow.tensor.transfer %[[WGT_TT]]
 // PRE:            %[[OUT:.+]] = linalg.batch_matmul
-// PRE-SAME:       ins(%[[LHS]], %[[WGT]] : tensor<1x?x64xi32>, tensor<1x64x128xi32>)
+// PRE-SAME:       ins(%[[LHS]], %[[WGT]] : tensor<1x?x64xi32>, tensor<1x128x64xi32>)
 // PRE-SAME:       outs(%[[ACC]] : tensor<1x?x128xi32>) -> tensor<1x?x128xi32>
 // PRE:            %{{.+}} = flow.tensor.transfer %[[OUT]]
 
+// The two transposes cancel, so nothing is transposed at run time: the matmul
+// reads %wgt as it comes in, and STRELA reads its rows as contiguous columns.
+
 // FLW-LABEL: module attributes {
-// FLW:         flow.executable private @[[TRANS_DISPATCH:.+]] {
+// FLW-NOT:     transpose
 // FLW:         flow.executable private @[[MATMUL_DISPATCH:.+]] {
 // FLW:           builtin.module {
 // FLW:             func.func @[[MATMUL_FUNC:.+]]
 // FLW:               %[[ACC:.+]] = linalg.fill
 // FLW:               %{{.+}} = linalg.batch_matmul
-// FLW:               ins(%{{.+}}, %{{.+}} : tensor<1x?x64xi32>, tensor<1x64x128xi32>)
+// FLW:               ins(%{{.+}}, %{{.+}} : tensor<1x?x64xi32>, tensor<1x128x64xi32>)
 // FLW:               outs(%[[ACC]] : tensor<1x?x128xi32>) -> tensor<1x?x128xi32>
 // FLW:         flow.executable private @[[BIAS_DISPATCH:.+]] {
 // FLW:         util.global private @{{.+}}
+// FLW:         util.func public @matmul_bias(
+// FLW:           flow.tensor.transfer %{{.+}} : tensor<128x64xi32> to #hal.device.affinity<@strela0>
 
 // EXC-LABEL: module attributes {stream.affinity.default
+// EXC:               strela.inp_column binding(1) address(%{{.+}}) words(64) stride(1)
 // EXC:               strela.job

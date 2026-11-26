@@ -19,9 +19,9 @@ iree_cc_library(
     "ConvertToStrelaABIPass.cpp"
     "LinkExecutablesPass.cpp"
     "StrelaOverlapLastTilePass.cpp"
-    "StrelaPrepareWeightsPass.cpp"
     "StrelaSelectLoweringStrategyPass.cpp"
     "StrelaStoreWorkgroupTilesPass.cpp"
+    "StrelaWidenOperandsPass.cpp"
     "TransferWrapPass.cpp"
   INCLUDES
     # Passes.h.inc lands next to the sources in the build tree and is included

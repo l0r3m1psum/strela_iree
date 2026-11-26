@@ -9,19 +9,19 @@
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --iree-hal-dump-executable-binaries-to=%t %s -o %t/matvec.vmfb
-// RUN: estela-dump-executable %t/module_matvec_dispatch_0_strela_bitstream.str1 \
+// RUN: estela-dump-executable %t/module_matvec_dispatch_1_strela_bitstream.str1 \
 // RUN:   | FileCheck %s
 
-// The frontend obeys #strela.target_desc: with a word limit below C * F = 128,
-// or a fabric the hand-written kernel was not written for, the matvec is not
-// offloaded and runs on the CPU instead. The backend never sees it, so it has
-// nothing to reject.
+// The frontend obeys #strela.target_desc: with a word limit below C = 16 (a
+// column of the transposed weights, see below), or a fabric the hand-written
+// kernel was not written for, the matvec is not offloaded and runs on the CPU
+// instead. The backend never sees it, so it has nothing to reject.
 // RUN: iree-compile --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
 // RUN:   --iree-hal-target-device=strela0=strela \
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --iree-strela-max-column-words=100 --compile-to=executable-targets %s \
+// RUN:   --iree-strela-max-column-words=15 --compile-to=executable-targets %s \
 // RUN:   | FileCheck %s --check-prefix=CPU
 // RUN: iree-compile --iree-plugin=estela --iree-strela-multiplier-width=32 \
 // RUN:   --iree-hal-target-device=cpu0=local[0] \
@@ -36,11 +36,16 @@
 // tests it).
 // CPU-NOT: strela.matvec
 // CPU:     hal.executable.variant public @vmvx_bytecode_fb
-// CPU:       hal.executable.export public @matvec_dispatch_0_batch_matmul_
+// CPU:       hal.executable.export public @matvec_dispatch_1_batch_matmul_
 // CPU-NOT: strela.matvec
 
 // N rows of C = 16 words times a C x F = 16 x 8 matrix. Not valid TOSA (no i32
 // matmul), but it is what reaches STRELA.
+//
+// The frontend transposes the weights of every matmul to F x C (IREE's
+// TransposeMatmul). %w is an input, so const-eval cannot fold the transpose:
+// it runs at run time, on the CPU, as dispatch 0, and the matvec is dispatch 1
+// and reads the transposed copy.
 func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x8xi32> {
   %zp = "tosa.const"() {values = dense<0> : tensor<1xi32>} : () -> tensor<1xi32>
   %0 = tosa.matmul %x, %w, %zp, %zp : (tensor<1x?x16xi32>, tensor<1x16x8xi32>, tensor<1xi32>, tensor<1xi32>) -> tensor<1x?x8xi32>
@@ -51,7 +56,7 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // grid is (ceildiv(8, 3), N, 1) = (3, N, 1), so x = 2 would start at feature 6
 // and run past F; the clamp moves it back to feature 5, F - 3, and it rewrites
 // result[y, 5] with the same value the job before it wrote.
-// CHECK:      "name": "matvec_dispatch_0_batch_matmul_1xDx8x16_i32",
+// CHECK:      "name": "matvec_dispatch_1_batch_matmul_1xDx8x16_i32",
 
 // The matvec bitstream with the accumulation length of PEs 9-11 patched to C:
 // (16 << 16) | 0x80 = 1048704.
@@ -80,9 +85,10 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK:        "word_stride": {
 // CHECK-NEXT:     "value": 1,
 
-// Columns 1-3 read columns f0, f0 + 1 and f0 + 2 of %w: C words, one every
-// F = 8, at 0, 4 and 8 bytes into %w. Each x moves them 3 features, 12 bytes,
-// up to the clamp of 4(F - 3) = 20 bytes; y does not move them.
+// Columns 1-3 read rows f0, f0 + 1 and f0 + 2 of the F x C transposed %w: C
+// contiguous words each, at 0, 64 and 128 bytes into it. Each x moves them 3
+// features, 3 * 4C = 192 bytes, up to the clamp of 4C(F - 3) = 320 bytes; y
+// does not move them.
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 1,
@@ -93,21 +99,21 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK-NEXT:     "delta": 0,
 // CHECK:          "wg_x_params": {
 // CHECK-NEXT:       "step": {
-// CHECK-NEXT:         "value": 12,
+// CHECK-NEXT:         "value": 192,
 // CHECK:            "limit": {
-// CHECK-NEXT:         "value": 20,
+// CHECK-NEXT:         "value": 320,
 // CHECK:          "wg_y_params": {
 // CHECK-NEXT:       "step": {
 // CHECK-NEXT:         "value": 0,
 // CHECK:        "word_count": {
 // CHECK-NEXT:     "value": 16,
 // CHECK:        "word_stride": {
-// CHECK-NEXT:     "value": 8,
+// CHECK-NEXT:     "value": 1,
 // CHECK:      },{
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 1,
 // CHECK-NEXT:     "offset": {
-// CHECK-NEXT:       "value": 4,
+// CHECK-NEXT:       "value": 64,
 // CHECK-NEXT:       "is_constant": false
 // CHECK-NEXT:     },
 // CHECK-NEXT:     "delta": 0,
@@ -115,7 +121,7 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK-NEXT:   "address": {
 // CHECK-NEXT:     "binding": 1,
 // CHECK-NEXT:     "offset": {
-// CHECK-NEXT:       "value": 8,
+// CHECK-NEXT:       "value": 128,
 // CHECK-NEXT:       "is_constant": false
 // CHECK-NEXT:     },
 // CHECK-NEXT:     "delta": 0,
@@ -162,6 +168,7 @@ func.func @matvec(%x: tensor<1x?x16xi32>, %w: tensor<1x16x8xi32>) -> tensor<1x?x
 // CHECK-NEXT:     "delta": 0,
 
 // Two push constants, the low and high halves of N, which only the workgroup
-// count uses; no column needs one. Three bindings: %x, %w and the result.
+// count uses; no column needs one. Three bindings: %x, the transposed %w and
+// the result.
 // CHECK:      "constant_count": 2,
 // CHECK-NEXT: "binding_count": 3

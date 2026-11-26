@@ -4,59 +4,31 @@
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --compile-to=flow %s | FileCheck %s
-// RUN: iree-compile --iree-plugin=estela \
-// RUN:   --iree-hal-target-device=cpu0=local[0] \
-// RUN:   --iree-hal-target-device=strela0=strela \
-// RUN:   --iree-hal-default-device=cpu0 \
-// RUN:   --iree-hal-local-target-device-backends=vmvx \
-// RUN:   --iree-strela-fold-bias \
-// RUN:   --compile-to=flow %s | FileCheck %s --check-prefix=FOLD
 
 // Two fully connected layers as TFLite emits them (the shape of every AD
 // layer): a quantized 1x1 tosa.conv2d on i8 with an input zero point, i32 bias
-// and accumulator, then a rescale to i8 and a clamp. StrelaPrepareWeights folds
-// the zero point into constants and widens the operands, so each layer is two
+// and accumulator, then a rescale to i8 and a clamp. The frontend (see
+// frontend.mlir) turns each into a matmul of i32 operands, so each layer is two
 // dispatches: the matmul on STRELA, and on the CPU the bias, the zero point
-// correction, the rescale, the clamp and the widening of the next layer's
-// input, fused. Only the model's input needs a widening of its own.
+// correction (one constant: const-eval merges b - zx * sum_c w), the rescale,
+// the clamp and the widening of the next layer's input, fused, writing i32.
+// Only the model's input needs a widening of its own.
 
 // CHECK-LABEL: util.func public @main
 // CHECK:         %[[X:.+]] = flow.dispatch @{{.+}}_elementwise_{{[a-zA-Z0-9_]+}}_i8xi32[
 // CHECK:         flow.tensor.transfer %[[X]] : {{.+}} to #hal.device.affinity<@strela0>
 // CHECK:         %[[WS:.+]] = flow.tensor.transfer %{{.+}} : tensor<8x16xi32> to #hal.device.affinity<@strela0>
-// CHECK:         %[[Y0:.+]] = flow.dispatch @{{.+}}_matmul_like_{{.+}}(%{{.+}}, %[[WS]],
+// CHECK:         %[[Y0:.+]] = flow.dispatch @{{.+}}_matmul_{{.+}}(%{{.+}}, %[[WS]],
 // CHECK:         %[[Y0H:.+]] = flow.tensor.transfer %[[Y0]] : {{.+}} to #hal.device.affinity<@cpu0>
 // CHECK:         %[[X1:.+]] = flow.dispatch @{{.+}}_elementwise_{{[a-zA-Z0-9_]+}}_i32[{{.+}}](%[[Y0H]],
+// CHECK-SAME:      : (tensor<?x8xi32>{{.*}}, tensor<8xi32>, index) -> tensor<?x8xi32>
 // CHECK:         %[[X1S:.+]] = flow.tensor.transfer %[[X1]] : {{.+}} to #hal.device.affinity<@strela0>
 // CHECK:         %[[W1S:.+]] = flow.tensor.transfer %{{.+}} : tensor<6x8xi32> to #hal.device.affinity<@strela0>
-// CHECK:         %[[Y1:.+]] = flow.dispatch @{{.+}}_matmul_like_{{.+}}(%[[X1S]], %[[W1S]],
+// CHECK:         %[[Y1:.+]] = flow.dispatch @{{.+}}_matmul_{{.+}}(%[[X1S]], %[[W1S]],
 // CHECK:         %[[Y1H:.+]] = flow.tensor.transfer %[[Y1]] : {{.+}} to #hal.device.affinity<@cpu0>
 // CHECK:         flow.dispatch @{{.+}}_elementwise_{{[a-zA-Z0-9_]+}}xi8[{{.+}}](%[[Y1H]],
 // CHECK-NOT:     flow.dispatch
 // CHECK:         util.return
-
-// With --iree-strela-fold-bias the bias is in the matmuls instead, as one more
-// reduction element (both biases fit 16 bits): the weights are F x (C + 1)
-// constants and STRELA reads [x - zx, 1]. Still two dispatches per layer,
-// none tied to a splat: the CPU dispatch writing x - zx (fused with the
-// rescale) writes the trailing 1 too, into a buffer of its own, so it stays on
-// the CPU, and nothing is copied.
-
-// FOLD-LABEL: util.func public @main
-// FOLD:         %[[X:.+]] = flow.dispatch @{{.+}}_elementwise_{{[a-zA-Z0-9_]+}}_i32[
-// FOLD:         flow.tensor.transfer %[[X]] : {{.+}} to #hal.device.affinity<@strela0>
-// FOLD:         %[[WS:.+]] = flow.tensor.transfer %{{.+}} : tensor<8x17xi32> to #hal.device.affinity<@strela0>
-// FOLD:         %[[Y0:.+]] = flow.dispatch @{{.+}}_matmul_like_Dx8x17_i32[{{.+}}](%{{.+}}, %[[WS]],
-// FOLD:         %[[Y0H:.+]] = flow.tensor.transfer %[[Y0]] : {{.+}} to #hal.device.affinity<@cpu0>
-// FOLD-NOT:     flow.tensor.splat
-// FOLD:         %[[X1:.+]] = flow.dispatch @{{.+}}_elementwise_{{[a-zA-Z0-9_]+}}_i32[{{.+}}](%{{.+}}, %[[Y0H]], %{{.+}}) : {{.+}} -> tensor<?xi32>
-// FOLD:         flow.tensor.transfer %[[X1]] : {{.+}} to #hal.device.affinity<@strela0>
-// FOLD:         %[[W1S:.+]] = flow.tensor.transfer %{{.+}} : tensor<6x9xi32> to #hal.device.affinity<@strela0>
-// FOLD:         %[[Y1:.+]] = flow.dispatch @{{.+}}_matmul_like_Dx6x9_i32[{{.+}}](%{{.+}}, %[[W1S]],
-// FOLD:         flow.tensor.transfer %[[Y1]] : {{.+}} to #hal.device.affinity<@cpu0>
-// FOLD:         flow.dispatch @{{.+}}_elementwise_{{[a-zA-Z0-9_]+}}xi8[
-// FOLD-NOT:     flow.dispatch
-// FOLD:         util.return
 
 func.func @main(%x: tensor<?x16xi8>) -> tensor<?x6xi8> {
   %xs = tosa.const_shape values(dense<[-1, 1, 1, 16]> : tensor<4xindex>) : () -> !tosa.shape<4>

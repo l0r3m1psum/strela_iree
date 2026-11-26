@@ -11,7 +11,7 @@
 // RUN:   --iree-hal-default-device=cpu0 \
 // RUN:   --iree-hal-local-target-device-backends=vmvx \
 // RUN:   --iree-hal-dump-executable-binaries-to=%t %s -o %t/matvec.vmfb
-// RUN: estela-dump-executable --header %t/module_matvec_dispatch_0_strela_bitstream.str1 \
+// RUN: estela-dump-executable --header %t/module_matvec_dispatch_1_strela_bitstream.str1 \
 // RUN:   | FileCheck %s
 //
 // The inputs are i32 of unknown range, which the operand-width check keeps on
@@ -22,6 +22,11 @@
 // matrix, every shape static. Not valid TOSA (no i32 matmul), but it is what
 // reaches STRELA. serialization_matvec.mlir follows the numbers of a bigger,
 // dynamic one.
+//
+// The frontend transposes the weights of every matmul to F x C (IREE's
+// TransposeMatmul). %w is an input, so const-eval cannot fold the transpose:
+// it runs at run time, on the CPU, as dispatch 0, and the matvec is dispatch 1
+// and reads the transposed copy.
 func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x3xi32> {
   %zp = "tosa.const"() {values = dense<0> : tensor<1xi32>} : () -> tensor<1xi32>
   %0 = tosa.matmul %x, %w, %zp, %zp : (tensor<1x2x16xi32>, tensor<1x16x3xi32>, tensor<1xi32>, tensor<1xi32>) -> tensor<1x2x3xi32>
@@ -42,7 +47,7 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // One ExportDef per dispatch STRELA runs, named as hal.executable.export.
 // CHECK-NEXT: "executable": {
 // CHECK-NEXT:   "exports": [{
-// CHECK-NEXT:       "name": "matvec_dispatch_0_batch_matmul_1x2x3x16_i32",
+// CHECK-NEXT:       "name": "matvec_dispatch_1_batch_matmul_1x2x3x16_i32",
 
 // The CGRA configuration, STRELA_KERNEL_SIZE (80) words; not checked here.
 // CHECK-NEXT:       "bitstream": [
@@ -99,11 +104,11 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:             "is_constant": false
 // CHECK-NEXT:           }
 
-// Columns 1-3 read the three columns of %w: C words, one every F = 3,
-// starting 0, 4 and 8 bytes into %w.
-// %w has a binding of its own, binding 1, as %x has binding 0: each device
-// works on the other's buffers in place, so nothing packs them into one.
-// Every job reads the same three columns.
+// Columns 1-3 read the three rows of the F x C transposed %w: C contiguous
+// words each, starting 0, 64 and 128 bytes into it.
+// The transposed %w has a binding of its own, binding 1, as %x has binding 0:
+// each device works on the other's buffers in place, so nothing packs them
+// into one. Every job reads the same three columns.
 // CHECK-NEXT:         },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 1,
@@ -117,12 +122,12 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:             "is_constant": false
 // CHECK-NEXT:           },
 // CHECK-NEXT:           "word_stride": {
-// CHECK-NEXT:             "value": 3,
+// CHECK-NEXT:             "value": 1,
 // CHECK:              },{
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 1,
 // CHECK-NEXT:             "offset": {
-// CHECK-NEXT:               "value": 4,
+// CHECK-NEXT:               "value": 64,
 // CHECK-NEXT:               "is_constant": false
 // CHECK-NEXT:             },
 // CHECK-NEXT:             "delta": 0,
@@ -130,7 +135,7 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:           "address": {
 // CHECK-NEXT:             "binding": 1,
 // CHECK-NEXT:             "offset": {
-// CHECK-NEXT:               "value": 8,
+// CHECK-NEXT:               "value": 128,
 // CHECK-NEXT:               "is_constant": false
 // CHECK-NEXT:             },
 // CHECK-NEXT:             "delta": 0,
@@ -164,7 +169,7 @@ func.func @matvec(%x: tensor<1x2x16xi32>, %w: tensor<1x16x3xi32>) -> tensor<1x2x
 // CHECK-NEXT:         },{
 
 // The pipeline layout: no push constants (every offset and size is static) and
-// three bindings, %x, %w and the result.
+// three bindings, %x, the transposed %w and the result.
 // CHECK:            "constant_count": 0,
 // CHECK-NEXT:       "binding_count": 3
 // CHECK-NEXT:     }

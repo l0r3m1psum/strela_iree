@@ -158,6 +158,28 @@ module attributes {stream.affinity.default = #hal.device.affinity<@cpu0>} {
     util.return %r : tensor<1x4x8xi32>
   }
 
+  // arith ops on tensors are elementwise and bound the elements as they do
+  // scalars: %x is i16 widened to i32 without a linalg op, and %w is an i32 of
+  // unknown range shifted right by 16, so within [-2^15, 2^15).
+
+  // CHECK-LABEL: util.func public @tensor_arith(
+  // CHECK:         %[[X:.+]] = arith.extsi %{{.+}} : tensor<1x4x16xi16> to tensor<1x4x16xi32>
+  // CHECK:         %[[W:.+]] = arith.shrsi %{{.+}}, %{{.+}} : tensor<1x16x8xi32>
+  // CHECK:         %[[X_S:.+]] = flow.tensor.transfer %[[X]] : tensor<1x4x16xi32> to #hal.device.affinity<@strela0>
+  // CHECK:         %[[W_S:.+]] = flow.tensor.transfer %[[W]] : tensor<1x16x8xi32> to #hal.device.affinity<@strela0>
+  // CHECK:         linalg.batch_matmul ins(%[[X_S]], %[[W_S]] : tensor<1x4x16xi32>, tensor<1x16x8xi32>)
+  util.func public @tensor_arith(%x16: tensor<1x4x16xi16>, %w32: tensor<1x16x8xi32>) -> tensor<1x4x8xi32> {
+    %c0_i32 = arith.constant 0 : i32
+    %x = arith.extsi %x16 : tensor<1x4x16xi16> to tensor<1x4x16xi32>
+    %c16 = arith.constant dense<16> : tensor<1x16x8xi32>
+    %w = arith.shrsi %w32, %c16 : tensor<1x16x8xi32>
+    %empty = tensor.empty() : tensor<1x4x8xi32>
+    %init = linalg.fill ins(%c0_i32 : i32) outs(%empty : tensor<1x4x8xi32>) -> tensor<1x4x8xi32>
+    %r = linalg.batch_matmul ins(%x, %w : tensor<1x4x16xi32>, tensor<1x16x8xi32>)
+                             outs(%init : tensor<1x4x8xi32>) -> tensor<1x4x8xi32>
+    util.return %r : tensor<1x4x8xi32>
+  }
+
   // So does a constant with a value outside int16 (32768).
 
   // CHECK-LABEL: util.func public @constant_out_of_range(

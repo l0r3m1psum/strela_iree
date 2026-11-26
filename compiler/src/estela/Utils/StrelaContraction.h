@@ -21,10 +21,12 @@ struct StrelaMatvecShape {
 // The shape the matvec kernel runs `op` with on the hardware `desc` describes,
 // or failure when it cannot run it. Failure for every op when `desc` is null.
 // With `asIfTransposed` the size limit is checked as if the weights were
-// already F x C, the question StrelaPrepareWeights asks before transposing.
+// already F x C, as IREE's TransposeMatmul makes them after
+// StrelaWidenOperands. With `asIfWidened` the inputs may be integers narrower
+// than i32, as if they were already extended. StrelaWidenOperands asks both.
 FailureOr<StrelaMatvecShape>
 matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc,
-                       bool asIfTransposed = false);
+                       bool asIfTransposed = false, bool asIfWidened = false);
 
 // `v` reshaped to `type`: a collapse_shape to a lower rank, an expand_shape to
 // a higher one, nothing for the same type. Unit dims may move (16x1 becomes

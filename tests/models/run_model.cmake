@@ -18,12 +18,12 @@
 #
 # To try a different compilation flow (e.g. flow.tensor.transfer onto a STRELA
 # device) edit COMPILE_FLAGS / RUN_FLAGS below. Nothing else here depends on how
-# the model is compiled.
+# the model is compiled. The CPU flow is plain IREE: the estela plugin's
+# frontend fails without a STRELA device.
 
 cmake_minimum_required(VERSION 3.20)
 
 set(COMPILE_FLAGS
-  --iree-plugin=estela
   --iree-hal-target-backends=llvm-cpu
   --iree-llvmcpu-target-cpu=host
 )

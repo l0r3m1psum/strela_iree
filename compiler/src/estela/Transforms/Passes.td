@@ -11,32 +11,21 @@ def AssignTopologyPass : Pass<"iree-strela-assign-topology", "mlir::ModuleOp"> {
   let summary = "Assigns the topology of the STRELA device";
 }
 
-def StrelaPrepareWeightsPass
-    : Pass<"iree-strela-prepare-weights", "mlir::iree_compiler::IREE::Util::FuncOp"> {
-  let summary = "Folds zero points and transposes the constant weights of STRELA matvecs";
+def StrelaWidenOperandsPass
+    : Pass<"iree-strela-widen-operands", "mlir::iree_compiler::IREE::Util::FuncOp"> {
+  let summary = "Extends the narrow operands of the matmuls STRELA will run to i32";
   let description = [{
-    First, a quantized 1x1 convolution with constant weights and zero points
-    (a TFLite fully connected layer) becomes an i32 matmul of the widened
-    activations and the weights minus their zero point, from a zero fill,
-    plus an elementwise add of its init and of the constant
-    -zx * sum_c w'[c, f] on the host: what the matvec kernel runs, with the
-    zero points folded into constants. With fold-bias and a constant bias,
-    the bias goes into the matmul instead, as extra reduction elements: the
-    activations x - zx get trailing ones and the weights trailing rows holding
-    the bias, split into parts that fit the multipliers. No host add is left.
-
-    Then, for each contraction TransferWrap will pin to STRELA whose weights
-    are a constant C x F tensor (TOSA's layout), transposes them to F x C with
-    a linalg.transpose that const-eval folds, and rewrites the contraction into
-    a linalg.generic reading them that way. Each feature's C weights are then
-    contiguous, so a weight column spans C words instead of C * F.
+    STRELA moves i32 words. Each linalg.matmul with integer inputs narrower
+    than i32 that TransferWrap will pin once they are widened gets them
+    through an elementwise arith.extsi to i32, and becomes a matmul of i32.
+    When the input comes from an elementwise linalg.generic used only by the
+    matmul (the rescale of the layer before), the extsi is fused into it with
+    linalg::fuseElementwiseOps: the narrow value only exists inside its body,
+    and its dispatch writes i32 directly. (Dispatch formation never fuses a
+    truncation with an extension.) The extsi stays visible, so the
+    operand-width check can still prove the range. Constant weights are
+    widened by const-eval. Fails without a STRELA device.
   }];
-  let options = [
-    Option<"foldBias", "fold-bias", "bool", /*default=*/"false",
-           "Fold the constant bias of a quantized fully connected layer into "
-           "its matmul as extra reduction elements, instead of adding it on "
-           "the host.">
-  ];
   let dependentDialects = [
     "mlir::arith::ArithDialect",
     "mlir::linalg::LinalgDialect",

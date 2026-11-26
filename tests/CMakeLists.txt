@@ -21,6 +21,7 @@ iree_lit_test_suite(
     "flush/transfer_flush.mlir"
     "runtime/strela_transfer.mlir"
     "end2end.mlir"
+    "frontend.mlir"
     "serialization.mlir"
     "serialization_matvec.mlir"
     "operand_width.mlir"
