@@ -2,6 +2,7 @@
 #include "iree/compiler/Dialect/HAL/Target/TargetDevice.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetRegistry.h"
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
+#include "iree/compiler/DispatchCreation/Passes.h"
 #include "iree/compiler/GlobalOptimization/Passes.h"
 #include "iree/compiler/PluginAPI/Client.h"
 #include "iree/compiler/Preprocessing/Common/Passes.h"
@@ -89,6 +90,12 @@ struct EstelaSession : public PluginSession<EstelaSession, EstelaOptions> {
       Preprocessing::createConvert1X1FilterConv2DToMatmulPass()
     );
     funcPassManager.addPass(createLinalgFoldUnitExtentDimsPass());
+    // A 1x1 convolution over an H x W image is then a contraction with rows
+    // (h, w): collapsed into one, it is a linalg.matmul of H * W rows, which
+    // is what the passes below and the matvec kernel take.
+    funcPassManager.addPass(
+      DispatchCreation::createCollapseContractionDimensionsPass()
+    );
     funcPassManager.addPass(createCanonicalizerPass());
     funcPassManager.addPass(createLinalgSpecializeGenericOpsPass());
     // The operands of the matmuls STRELA will run widened to i32, the weights

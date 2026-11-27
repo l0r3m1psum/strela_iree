@@ -12,8 +12,9 @@
 #
 #   <model>.mlirbc       TOSA input from the converter, as bytecode
 #   <model>.mlir         the same, printed as text by iree-opt
-#   <model>.static.mlir  only when PIN_BATCH is set
-#   <model>.vmfb         the module that was run
+#   <model>.static.mlir  the same with the batch pinned to 1, only when
+#                        PIN_BATCH is set
+#   <model>.vmfb        the module that was run
 #   run.txt              iree-run-module output, including the result tensors
 #
 # To try a different compilation flow (e.g. flow.tensor.transfer onto a STRELA
@@ -64,7 +65,9 @@ set(_source "${_dir}/${_stem}.mlir")
 #      OUT_OF_RANGE; indirect buffer reference slot 0 is out range of the
 #      declared binding capacity of the command buffer
 #    Pinning the batch to 1 is correct for these single-inference models and is
-#    what makes them runnable. Which models need it is decided in CMakeLists.txt.
+#    what makes them runnable. Which models need it is decided in
+#    CMakeLists.txt: kws_ref_model, str_ww_ref_model and vww_96_int8 still
+#    fail without it (checked 2026-11-27).
 if(PIN_BATCH)
   file(READ "${_source}" _ir)
   string(REPLACE "?x" "1x" _ir "${_ir}")
@@ -96,7 +99,8 @@ message(STATUS "result in ${_dir}/run.txt:\n${_out}")
 
 # EXPLANATION
 #
-# Some models cannot be compiled for llvm-cpu and fall back to vmvx.
+# Why some models need PIN_BATCH: with the batch dynamic, they cannot be
+# compiled for llvm-cpu.
 #
 # How it fails. LLVMCPUCheckIRBeforeLLVMConversion rejects the dispatch:
 #
@@ -114,12 +118,12 @@ message(STATUS "result in ${_dir}/run.txt:\n${_out}")
 # dimension. The check just cannot prove a bound at compile time.
 #
 # So the models are fine and the IR is fine. vmvx does not run this check,
-# which is why compiling them for vmvx works and is what happens below.
+# so they compile for vmvx, but as step 2 says they still cannot run there.
 # Note it is not simply "dynamic shapes fail" either -- kws_ref_model_float32
 # has dynamic shapes throughout and compiles for llvm-cpu, because none of
 # them reach a stack temporary.
 #
-# Two other ways to fix it, neither used here:
+# Two other ways to fix it, besides the pinning in step 2:
 #
 #   1. Pass --iree-llvmcpu-fail-on-out-of-bounds-stack-allocation=false.
 #      Compiles for llvm-cpu with the model untouched. Costs nothing, but

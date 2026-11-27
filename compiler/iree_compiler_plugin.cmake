@@ -34,6 +34,7 @@ iree_cc_library(
     iree::compiler::Dialect::HAL::Target
     iree::compiler::Dialect::Stream::IR
     iree::compiler::Dialect::Util::IR
+    iree::compiler::DispatchCreation
     iree::compiler::GlobalOptimization
     iree::compiler::PluginAPI
     iree::compiler::Preprocessing::Common::Transforms

@@ -11,7 +11,9 @@
 //   iree-global-opt-quantized-conv-to-conv                 (IREE)
 //   iree-global-opt-detach-elementwise-from-named-ops      (IREE)
 //   iree-preprocessing-convert-1x1-filter-conv2d-to-matmul (IREE)
-//   linalg-fold-unit-extent-dims, canonicalize             (MLIR)
+//   linalg-fold-unit-extent-dims                           (MLIR)
+//   iree-dispatch-creation-collapse-contraction-dimensions (IREE)
+//   canonicalize                                           (MLIR)
 //   linalg-specialize-generic-ops                          (MLIR)
 //   iree-strela-widen-operands                             (STRELA)
 //   iree-preprocessing-transpose-matmul-pass{input=rhs}    (IREE)
@@ -144,6 +146,10 @@ func.func @main(%x: tensor<?x4xi8>) -> tensor<?x3xi8> {
 // UNIT:         linalg.generic {indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>, affine_map<(d0, d1, d2) -> (d0, d1)>]
 // UNIT-SAME:      iterator_types = ["parallel", "parallel", "reduction"]}
 // UNIT-SAME:      ins(%[[X]], %[[W]] : tensor<?x4xi8>, tensor<4x3xi8>) outs(%{{.+}} : tensor<?x3xi32>)
+
+// IREE's CollapseContractionDimensions has nothing to do here: the rows are
+// the single dim n. A 1x1 convolution over an image has two, see
+// conv1x1.mlir.
 
 // MLIR's SpecializeGenericOps names what it recognizes: the contraction is a
 // linalg.matmul (i8 x i8 into i32), the bias a linalg.broadcast and its add a

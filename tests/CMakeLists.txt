@@ -26,6 +26,7 @@ iree_lit_test_suite(
     "serialization_matvec.mlir"
     "operand_width.mlir"
     "quantized_fc.mlir"
+    "conv1x1.mlir"
   TOOLS
     FileCheck
     estela::tools::estela-dump-executable

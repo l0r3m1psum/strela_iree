@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# TODO(Diego): this should be split in a config.sh and build.sh in config all
+# the cmake lines without build should go. Also sensible names to build directory
+# should be given like estela-compiler estela-runtime. Also a test.sh should
+# contain the cmake or ctest lines.
+
 set -e
 
 # Host build: the Estela compiler plugin (compiler/iree_compiler_plugin.cmake).
