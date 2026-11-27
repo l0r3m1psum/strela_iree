@@ -31,8 +31,6 @@ set(_models
   "anomaly_detection/trained_models/ToyCar/baseline_tf23/model/model_ToyCar_quant_fullint_micro.tflite|1x640xf32|OFF"
   "anomaly_detection/trained_models/ToyCar/baseline_tf23/model/model_ToyCar_quant_fullint_micro_intio.tflite|1x640xi8|OFF"
   "keyword_spotting/trained_models/kws_ref_model_float32.tflite|1x49x10x1xf32|OFF"
-  "image_classification/trained_models/pretrainedResnet_large_int8.tflite|1x32x32x3xi8|ON"
-  "image_classification/trained_models/pretrainedResnet_quant.tflite|1x32x32x3xi8|ON"
   "keyword_spotting/trained_models/kws_ref_model.tflite|1x49x10x1xi8|ON"
   "streaming_wakeword/trained_models/str_ww_ref_model.tflite|1x30x1x40xi8|ON"
   "visual_wake_words/trained_models/vww_96_int8.tflite|1x96x96x3xi8|ON"
