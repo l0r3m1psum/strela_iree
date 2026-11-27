@@ -17,3 +17,16 @@ iree_cc_binary(
     iree::base::internal::flatcc::parsing
     estela::schemas::strela_executable_def_c_fbs
 )
+
+iree_cc_binary(
+  NAME
+    estela-find-gemv-usage
+  SRCS
+    "estela-find-gemv-usage.cpp"
+  DEPS
+    LLVMSupport
+    MLIRFuncDialect
+    MLIRIR
+    MLIRParser
+    MLIRTosaDialect
+)
