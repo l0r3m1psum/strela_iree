@@ -17,11 +17,11 @@ compatible(int64_t a, int64_t b) {
 
 // NxC times CxF gives NxF; a dynamic size is checked against nothing.
 LogicalResult MatvecOp::verify() {
-  auto lhsType = cast<RankedTensorType>(getLhs().getType());
-  auto rhsType = cast<RankedTensorType>(getRhs().getType());
-  auto outType = cast<RankedTensorType>(getResult().getType());
+  auto lhsType = cast<MemRefType>(getLhs().getType());
+  auto rhsType = cast<MemRefType>(getRhs().getType());
+  auto outType = cast<MemRefType>(getOut().getType());
   if (lhsType.getRank() != 2 || rhsType.getRank() != 2 || outType.getRank() != 2) {
-    return emitOpError("expected rank 2 operands and result");
+    return emitOpError("expected rank 2 operands");
   }
 
   // C and F of the rhs: C x F, or F x C with transpose_rhs.

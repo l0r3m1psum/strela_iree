@@ -1,11 +1,10 @@
 #include "estela/Transforms/Passes.h"
 
-#include "iree/compiler/Dialect/TensorExt/IR/TensorExtOps.h"
-
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/IR/AffineValueMap.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/PatternMatch.h"
 
 namespace mlir::estela {
@@ -14,7 +13,6 @@ namespace mlir::estela {
 } // namespace mlir::estela
 
 using namespace mlir;
-using namespace mlir::iree_compiler;
 
 namespace {
 
@@ -80,13 +78,16 @@ matchTailClamp(Value size, Value offset, int64_t extent) {
   return tile;
 }
 
-// The tail clamps of one dispatch.tensor.load or store, rewritten in place:
-// the offset becomes min(offset, extent - tile) and the size the tile.
-template <typename OpTy>
+// The tail clamps of one tile's subview of a binding, rewritten in place: the
+// offset becomes min(offset, extent - tile) and the size the tile.
 static void
-overlapLastTile(RewriterBase &rewriter, OpTy op, ArrayRef<int64_t> shape,
-                SmallVectorImpl<Value> &clampedSizes,
-                SmallVectorImpl<int64_t> &tiles) {
+overlapLastTile(
+  RewriterBase &rewriter,
+  memref::SubViewOp op,
+  SmallVectorImpl<Value> &clampedSizes,
+  SmallVectorImpl<int64_t> &tiles
+) {
+  ArrayRef<int64_t> shape = op.getSourceType().getShape();
   SmallVector<OpFoldResult> offsets = op.getMixedOffsets();
   SmallVector<OpFoldResult> sizes = op.getMixedSizes();
   for (auto [d, extent] : llvm::enumerate(shape)) {
@@ -123,10 +124,10 @@ overlapLastTile(RewriterBase &rewriter, OpTy op, ArrayRef<int64_t> shape,
 // overlaps the one before it, rewriting the same values. The clamped offset is
 // exactly the min(wg · step, limit) term of a column address.
 //
-// Runs after ReconcileTranslationInfo, so the overlapping writes are plain
-// stores rather than conflicting parallel_insert_slices. Correct when jobs run
-// concurrently on several CGRAs: overlapping jobs write the same values to the
-// same whole words.
+// Runs after bufferization and ReconcileTranslationInfo, on the subviews of
+// the bindings each job reads and writes, so the overlapping writes are writes
+// of separate jobs to memory. Correct when jobs run concurrently on several
+// CGRAs: overlapping jobs write the same values to the same whole words.
 struct StrelaOverlapLastTilePass final
     : estela::impl::StrelaOverlapLastTilePassBase<StrelaOverlapLastTilePass> {
   void runOnOperation() override {
@@ -134,18 +135,11 @@ struct StrelaOverlapLastTilePass final
     IRRewriter rewriter(funcOp.getContext());
     SmallVector<Value> clampedSizes;
     SmallVector<int64_t> tiles;
-    funcOp.walk([&](Operation *op) {
-      if (auto loadOp = dyn_cast<IREE::TensorExt::DispatchTensorLoadOp>(op)) {
-        overlapLastTile(rewriter, loadOp, loadOp.getSourceType().getShape(),
-                        clampedSizes, tiles);
-      } else if (auto storeOp =
-                   dyn_cast<IREE::TensorExt::DispatchTensorStoreOp>(op)) {
-        overlapLastTile(rewriter, storeOp, storeOp.getTargetType().getShape(),
-                        clampedSizes, tiles);
-      }
+    funcOp.walk([&](memref::SubViewOp op) {
+      overlapLastTile(rewriter, op, clampedSizes, tiles);
     });
-    // Every use of a clamped size, the tile's tensor.empty included, now sees
-    // the full tile.
+    // Every use of a clamped size now sees the full tile; canonicalization
+    // then makes the subviews static.
     for (auto [size, tile] : llvm::zip_equal(clampedSizes, tiles)) {
       if (!size.getDefiningOp()) continue;
       rewriter.setInsertionPoint(size.getDefiningOp());

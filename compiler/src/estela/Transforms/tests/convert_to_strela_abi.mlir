@@ -3,11 +3,12 @@
 // RUN:   %s | FileCheck %s
 
 // iree-strela-convert-to-strela-abi turns the hal.interface.* ops into their
-// strela.* counterparts, then replaces a strela.matvec on one job's tile and
-// the loads and store around it with one strela.job: the matvec bitstream and
-// the DMA columns, in hardware column order. A column address is SSA index
-// arithmetic: the byte offset of its binding, plus where the tile starts (on
-// the workgroup ids) and the column in it; the job verifier folds it.
+// strela.* counterparts, then replaces a strela.matvec on one job's tiles, the
+// subviews of the bindings bufferization leaves, with one strela.job: the
+// matvec bitstream and the DMA columns, in hardware column order. A column
+// address is SSA index arithmetic: the byte offset of its binding, plus where
+// the tile starts (on the workgroup ids) and the column in it, times the
+// binding's strides; the job verifier folds it.
 
 #layout = #hal.pipeline.layout<constants = 2, bindings = [
   #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
@@ -63,16 +64,19 @@ hal.executable private @offsets {
         %1 = arith.index_castui %0 : i32 to index
         %2 = hal.interface.constant.load layout(#layout) ordinal(1) : i32
         %3 = arith.index_castui %2 : i32 to index
-        %4 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%1) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<2x16xi32>>
-        %5 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%3) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x8xi32>>
-        %6 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c64) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<2x8xi32>>
+        %4 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%1) flags("ReadOnly|Indirect") : memref<2x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %a4 = memref.assume_alignment %4, 64 : memref<2x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %5 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%3) flags("ReadOnly|Indirect") : memref<16x8xi32, strided<[8, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %a5 = memref.assume_alignment %5, 64 : memref<16x8xi32, strided<[8, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %6 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c64) flags(Indirect) : memref<2x8xi32, strided<[8, 1], offset: 16>, #hal.descriptor_type<storage_buffer>>
+        %a6 = memref.assume_alignment %6, 64 : memref<2x8xi32, strided<[8, 1], offset: 16>, #hal.descriptor_type<storage_buffer>>
         %wg_y = hal.interface.workgroup.id[1] : index
         %wg_x = hal.interface.workgroup.id[0] : index
         %f0 = affine.min affine_map<()[s0] -> (5, s0 * 3)>()[%wg_x]
-        %7 = iree_tensor_ext.dispatch.tensor.load %4, offsets = [%wg_y, 0], sizes = [1, 16], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<2x16xi32>> -> tensor<1x16xi32>
-        %8 = iree_tensor_ext.dispatch.tensor.load %5, offsets = [0, %f0], sizes = [16, 3], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x8xi32>> -> tensor<16x3xi32>
-        %9 = strela.matvec %7, %8 : tensor<1x16xi32>, tensor<16x3xi32> -> tensor<1x3xi32>
-        iree_tensor_ext.dispatch.tensor.store %9, %6, offsets = [%wg_y, %f0], sizes = [1, 3], strides = [1, 1] : tensor<1x3xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<2x8xi32>>
+        %7 = memref.subview %a4[%wg_y, 0] [1, 16] [1, 1] : memref<2x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>> to memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %8 = memref.subview %a5[0, %f0] [16, 3] [1, 1] : memref<16x8xi32, strided<[8, 1], offset: ?>, #hal.descriptor_type<storage_buffer>> to memref<16x3xi32, strided<[8, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %9 = memref.subview %a6[%wg_y, %f0] [1, 3] [1, 1] : memref<2x8xi32, strided<[8, 1], offset: 16>, #hal.descriptor_type<storage_buffer>> to memref<1x3xi32, strided<[8, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        strela.matvec ins(%7, %8 : memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>, memref<16x3xi32, strided<[8, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>) outs(%9 : memref<1x3xi32, strided<[8, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>)
         return
       }
     }
@@ -104,16 +108,16 @@ hal.executable private @transposed_weights {
     builtin.module {
       func.func @transposed_weights() {
         %c0 = arith.constant 0 : index
-        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<2x16xi32>>
-        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags(ReadOnly) : !iree_tensor_ext.dispatch.tensor<readonly:tensor<8x16xi32>>
-        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<2x8xi32>>
+        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : memref<2x16xi32, #hal.descriptor_type<storage_buffer>>
+        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags(ReadOnly) : memref<8x16xi32, #hal.descriptor_type<storage_buffer>>
+        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : memref<2x8xi32, #hal.descriptor_type<storage_buffer>>
         %wg_y = hal.interface.workgroup.id[1] : index
         %wg_x = hal.interface.workgroup.id[0] : index
         %f0 = affine.min affine_map<()[s0] -> (5, s0 * 3)>()[%wg_x]
-        %3 = iree_tensor_ext.dispatch.tensor.load %0, offsets = [%wg_y, 0], sizes = [1, 16], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<2x16xi32>> -> tensor<1x16xi32>
-        %4 = iree_tensor_ext.dispatch.tensor.load %1, offsets = [%f0, 0], sizes = [3, 16], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<8x16xi32>> -> tensor<3x16xi32>
-        %5 = strela.matvec %3, %4 transpose_rhs : tensor<1x16xi32>, tensor<3x16xi32> -> tensor<1x3xi32>
-        iree_tensor_ext.dispatch.tensor.store %5, %2, offsets = [%wg_y, %f0], sizes = [1, 3], strides = [1, 1] : tensor<1x3xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<2x8xi32>>
+        %3 = memref.subview %0[%wg_y, 0] [1, 16] [1, 1] : memref<2x16xi32, #hal.descriptor_type<storage_buffer>> to memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %4 = memref.subview %1[%f0, 0] [3, 16] [1, 1] : memref<8x16xi32, #hal.descriptor_type<storage_buffer>> to memref<3x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %5 = memref.subview %2[%wg_y, %f0] [1, 3] [1, 1] : memref<2x8xi32, #hal.descriptor_type<storage_buffer>> to memref<1x3xi32, strided<[8, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        strela.matvec ins(%3, %4 : memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>, memref<3x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>) outs(%5 : memref<1x3xi32, strided<[8, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>) transpose_rhs
         return
       }
     }
@@ -159,13 +163,13 @@ hal.executable private @offset_forms {
         %6 = hal.interface.constant.load layout(#layout) ordinal(1) : i32
         %7 = arith.index_castui %6 : i32 to index
         %8 = arith.addi %7, %c64 : index
-        %9 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%5) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16xi32>>
-        %10 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%8) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x3xi32>>
-        %11 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x3xi32>>
-        %12 = iree_tensor_ext.dispatch.tensor.load %9, offsets = [0, 0], sizes = [1, 16], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16xi32>> -> tensor<1x16xi32>
-        %13 = iree_tensor_ext.dispatch.tensor.load %10, offsets = [0, 0], sizes = [16, 3], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x3xi32>> -> tensor<16x3xi32>
-        %14 = strela.matvec %12, %13 : tensor<1x16xi32>, tensor<16x3xi32> -> tensor<1x3xi32>
-        iree_tensor_ext.dispatch.tensor.store %14, %11, offsets = [0, 0], sizes = [1, 3], strides = [1, 1] : tensor<1x3xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x3xi32>>
+        %9 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%5) flags("ReadOnly|Indirect") : memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %10 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%8) flags("ReadOnly|Indirect") : memref<16x3xi32, strided<[3, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %11 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags(Indirect) : memref<1x3xi32, #hal.descriptor_type<storage_buffer>>
+        %12 = memref.subview %9[0, 0] [1, 16] [1, 1] : memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>> to memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %13 = memref.subview %10[0, 0] [16, 3] [1, 1] : memref<16x3xi32, strided<[3, 1], offset: ?>, #hal.descriptor_type<storage_buffer>> to memref<16x3xi32, strided<[3, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %14 = memref.subview %11[0, 0] [1, 3] [1, 1] : memref<1x3xi32, #hal.descriptor_type<storage_buffer>> to memref<1x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>
+        strela.matvec ins(%12, %13 : memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>, memref<16x3xi32, strided<[3, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>) outs(%14 : memref<1x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>)
         return
       }
     }
@@ -177,7 +181,7 @@ hal.executable private @offset_forms {
 // A 64 bit offset whose high half is only known at dispatch time is two push
 // constants, which a column address can't hold. This is what Stream emits by
 // default; --iree-stream-resource-index-bits=32 makes it a single constant.
-// The column carries the location of the load it came from.
+// The column carries the location of the subview it came from.
 
 #layout = #hal.pipeline.layout<constants = 2, bindings = [
   #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
@@ -198,14 +202,75 @@ hal.executable private @split_offset {
         %4 = arith.shli %3, %c32_i64 : i64
         %5 = arith.ori %2, %4 : i64
         %6 = arith.index_castui %5 : i64 to index
-        %7 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%6) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16xi32>>
-        %8 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x3xi32>>
-        %9 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x3xi32>>
+        %7 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%6) flags("ReadOnly|Indirect") : memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %8 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : memref<16x3xi32, #hal.descriptor_type<storage_buffer>>
+        %9 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : memref<1x3xi32, #hal.descriptor_type<storage_buffer>>
         // expected-error @+1 {{is a 64 bit value split over two push constants; STRELA takes 32 bit offsets, retry with --iree-stream-resource-index-bits=32}}
-        %10 = iree_tensor_ext.dispatch.tensor.load %7, offsets = [0, 0], sizes = [1, 16], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<1x16xi32>> -> tensor<1x16xi32>
-        %11 = iree_tensor_ext.dispatch.tensor.load %8, offsets = [0, 0], sizes = [16, 3], strides = [1, 1] : !iree_tensor_ext.dispatch.tensor<readonly:tensor<16x3xi32>> -> tensor<16x3xi32>
-        %12 = strela.matvec %10, %11 : tensor<1x16xi32>, tensor<16x3xi32> -> tensor<1x3xi32>
-        iree_tensor_ext.dispatch.tensor.store %12, %9, offsets = [0, 0], sizes = [1, 3], strides = [1, 1] : tensor<1x3xi32> -> !iree_tensor_ext.dispatch.tensor<writeonly:tensor<1x3xi32>>
+        %10 = memref.subview %7[0, 0] [1, 16] [1, 1] : memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>> to memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>
+        %11 = memref.subview %8[0, 0] [16, 3] [1, 1] : memref<16x3xi32, #hal.descriptor_type<storage_buffer>> to memref<16x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>
+        %12 = memref.subview %9[0, 0] [1, 3] [1, 1] : memref<1x3xi32, #hal.descriptor_type<storage_buffer>> to memref<1x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>
+        strela.matvec ins(%10, %11 : memref<1x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>, memref<16x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>) outs(%12 : memref<1x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>)
+        return
+      }
+    }
+  }
+}
+
+// -----
+
+// Every operand must be a tile of a binding: the kernel's columns read and
+// write nothing else. A buffer of the dispatch's own, here the output, would
+// be memory the CGRA cannot reach; allocating it is already refused.
+
+#layout = #hal.pipeline.layout<bindings = [
+  #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
+  #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">
+], flags = Indirect>
+
+hal.executable private @local_output {
+  hal.executable.variant public @strela_bitstream target(<"strela", "strela_bitstream", {strela.target_desc = #strela.target_desc<rows = 4, columns = 4, max_column_words = 16383>}>) {
+    builtin.module {
+      func.func @local_output() {
+        %c0 = arith.constant 0 : index
+        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : memref<1x16xi32, #hal.descriptor_type<storage_buffer>>
+        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : memref<16x3xi32, #hal.descriptor_type<storage_buffer>>
+        %2 = memref.subview %0[0, 0] [1, 16] [1, 1] : memref<1x16xi32, #hal.descriptor_type<storage_buffer>> to memref<1x16xi32, strided<[16, 1]>, #hal.descriptor_type<storage_buffer>>
+        %3 = memref.subview %1[0, 0] [16, 3] [1, 1] : memref<16x3xi32, #hal.descriptor_type<storage_buffer>> to memref<16x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>
+        // expected-error @+1 {{writes memory besides the STRELA kernel}}
+        %4 = memref.alloca() : memref<1x3xi32>
+        strela.matvec ins(%2, %3 : memref<1x16xi32, strided<[16, 1]>, #hal.descriptor_type<storage_buffer>>, memref<16x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>) outs(%4 : memref<1x3xi32>)
+        return
+      }
+    }
+  }
+}
+
+// -----
+
+// The job is all a STRELA dispatch runs. A copy bufferization could not
+// remove, here into the output tile, would be dropped without a word.
+
+#layout = #hal.pipeline.layout<bindings = [
+  #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
+  #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
+  #hal.pipeline.binding<storage_buffer, Indirect>
+], flags = Indirect>
+
+hal.executable private @leftover_copy {
+  hal.executable.variant public @strela_bitstream target(<"strela", "strela_bitstream", {strela.target_desc = #strela.target_desc<rows = 4, columns = 4, max_column_words = 16383>}>) {
+    builtin.module {
+      func.func @leftover_copy() {
+        %c0 = arith.constant 0 : index
+        %0 = hal.interface.binding.subspan layout(#layout) binding(0) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : memref<1x16xi32, #hal.descriptor_type<storage_buffer>>
+        %1 = hal.interface.binding.subspan layout(#layout) binding(1) alignment(64) offset(%c0) flags("ReadOnly|Indirect") : memref<16x3xi32, #hal.descriptor_type<storage_buffer>>
+        %2 = hal.interface.binding.subspan layout(#layout) binding(2) alignment(64) offset(%c0) flags(Indirect) : memref<1x3xi32, #hal.descriptor_type<storage_buffer>>
+        %3 = memref.subview %0[0, 0] [1, 16] [1, 1] : memref<1x16xi32, #hal.descriptor_type<storage_buffer>> to memref<1x16xi32, strided<[16, 1]>, #hal.descriptor_type<storage_buffer>>
+        %4 = memref.subview %1[0, 0] [16, 3] [1, 1] : memref<16x3xi32, #hal.descriptor_type<storage_buffer>> to memref<16x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>
+        %5 = memref.subview %2[0, 0] [1, 3] [1, 1] : memref<1x3xi32, #hal.descriptor_type<storage_buffer>> to memref<1x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>
+        %6 = memref.subview %0[0, 0] [1, 3] [1, 1] : memref<1x16xi32, #hal.descriptor_type<storage_buffer>> to memref<1x3xi32, strided<[16, 1]>, #hal.descriptor_type<storage_buffer>>
+        strela.matvec ins(%3, %4 : memref<1x16xi32, strided<[16, 1]>, #hal.descriptor_type<storage_buffer>>, memref<16x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>) outs(%5 : memref<1x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>)
+        // expected-error @+1 {{writes memory besides the STRELA kernel}}
+        memref.copy %6, %5 : memref<1x3xi32, strided<[16, 1]>, #hal.descriptor_type<storage_buffer>> to memref<1x3xi32, strided<[3, 1]>, #hal.descriptor_type<storage_buffer>>
         return
       }
     }

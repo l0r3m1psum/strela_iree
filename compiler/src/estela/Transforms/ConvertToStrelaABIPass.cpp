@@ -2,13 +2,12 @@
 
 #include "iree/compiler/Dialect/HAL/IR/HALDialect.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
-#include "iree/compiler/Dialect/TensorExt/IR/TensorExtOps.h"
-#include "iree/compiler/Dialect/TensorExt/IR/TensorExtTypes.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -117,60 +116,93 @@ convertInterface(func::FuncOp funcOp) {
 // Phase 2: the kernel and its loads and store become a job
 //===--------------------------------------------------------------------===//
 
-// One operand or the result of the kernel: the binding its tensor is in, and
-// the tile of it the load or store moves.
+// One operand of the kernel: the binding its buffer is in, and the tile of it
+// the kernel reads or writes.
 struct KernelTensor {
-  Operation *op = nullptr; // the dispatch.tensor.load or store
+  // The tile's subview (the matvec when the tile is the whole binding): the
+  // columns carry its location.
+  Operation *tileOp = nullptr;
   strela::BindingOp binding;
-  // The whole tensor's shape, which gives the strides.
-  SmallVector<int64_t> shape;
+  // Element strides of the whole buffer, from its layout.
+  std::array<int64_t, 2> strides;
   // The tile: where it starts (arithmetic on the workgroup ids) and its static
   // sizes.
   SmallVector<OpFoldResult> offsets;
   SmallVector<int64_t> sizes;
 };
 
+// `operand` of the kernel: a dense subview of a strela.binding, or the whole
+// binding when the tile is all of it (canonicalization folds that subview
+// away), possibly through a memref.cast and the memref.assume_alignment
+// bufferization puts on the binding.
 static FailureOr<KernelTensor>
-matchKernelTensor(
-  Operation *op, Value dispatchTensor, ArrayRef<OpFoldResult> offsets,
-  ArrayRef<OpFoldResult> sizes, ArrayRef<OpFoldResult> strides
-) {
-  if (!llvm::all_of(strides, [](OpFoldResult s) { return isConstantIntValue(s, 1); })) {
-    return op->emitOpError("moves a strided tile; STRELA kernels take and "
-                           "produce dense tiles");
+matchKernelTensor(strela::MatvecOp matvecOp, Value operand) {
+  if (auto castOp = operand.getDefiningOp<memref::CastOp>()) {
+    operand = castOp.getSource();
   }
-  auto bindingOp = dispatchTensor.getDefiningOp<strela::BindingOp>();
+  auto subviewOp = operand.getDefiningOp<memref::SubViewOp>();
+  // Where errors about the tile go.
+  Operation *tileOp = subviewOp ? subviewOp.getOperation() : matvecOp;
+  Value source = subviewOp ? subviewOp.getSource() : operand;
+  if (auto alignOp = source.getDefiningOp<memref::AssumeAlignmentOp>()) {
+    source = alignOp.getMemref();
+  }
+  auto bindingOp = source.getDefiningOp<strela::BindingOp>();
   if (!bindingOp) {
-    return op->emitOpError("does not access a strela.binding");
+    return tileOp->emitOpError()
+           << (subviewOp ? "is" : "has an operand that is")
+           << " not a tile of a dispatch binding; the kernel would need a "
+              "computation STRELA cannot perform";
   }
-  auto type = cast<IREE::TensorExt::DispatchTensorType>(dispatchTensor.getType());
-  if (type.getShape().size() != 2) {
-    return op->emitOpError("expected a rank 2 binding, got ") << type;
+  auto type = cast<MemRefType>(source.getType());
+  if (type.getRank() != 2) {
+    return tileOp->emitOpError("expected a rank 2 binding, got ") << type;
+  }
+  SmallVector<int64_t> strides;
+  int64_t offset;
+  if (failed(type.getStridesAndOffset(strides, offset)) ||
+      ShapedType::isDynamic(strides[0]) || strides[1] != 1) {
+    return tileOp->emitOpError("needs a binding with static rows of "
+                               "contiguous words, got ") << type;
+  }
+
+  OpBuilder builder(matvecOp);
+  SmallVector<OpFoldResult> offsets(2, builder.getIndexAttr(0));
+  SmallVector<OpFoldResult> sizes = getAsIndexOpFoldResult(
+    builder.getContext(), type.getShape()
+  );
+  if (subviewOp) {
+    if (!llvm::all_of(subviewOp.getMixedStrides(), [](OpFoldResult s) {
+          return isConstantIntValue(s, 1);
+        })) {
+      return subviewOp.emitOpError("is a strided tile; STRELA kernels take "
+                                   "and produce dense tiles");
+    }
+    offsets = subviewOp.getMixedOffsets();
+    sizes = subviewOp.getMixedSizes();
   }
   SmallVector<int64_t> staticSizes;
   for (OpFoldResult size : sizes) {
     std::optional<int64_t> constant = getConstantIntValue(size);
-    if (!constant) {
-      return op->emitOpError("moves a tile of dynamic size; every STRELA job "
-                             "runs a whole tile");
+    if (!constant || ShapedType::isDynamic(*constant)) {
+      return tileOp->emitOpError("is a tile of dynamic size; every STRELA "
+                                 "job runs a whole tile");
     }
     staticSizes.push_back(*constant);
   }
   return KernelTensor{
-    op, bindingOp, llvm::to_vector(type.getShape()), llvm::to_vector(offsets),
-    staticSizes
+    tileOp, bindingOp, {strides[0], strides[1]}, offsets, staticSizes
   };
 }
 
 struct StrelaEntryPoint {
   strela::MatvecOp matvecOp;
-  IREE::TensorExt::DispatchTensorStoreOp storeOp;
   // Indexed by KernelColumn::Operand.
   std::array<KernelTensor, 3> tensors;
 };
 
-// Finds the single strela.matvec of an entry point and the loads and store
-// around it. Every failure is reported at the offending op: a STRELA dispatch
+// Finds the single strela.matvec of an entry point and the tiles it reads and
+// writes. Every failure is reported at the offending op: a STRELA dispatch
 // that cannot be described exactly must not be silently handed a kernel.
 static FailureOr<StrelaEntryPoint>
 analyzeEntryPoint(func::FuncOp funcOp) {
@@ -189,38 +221,27 @@ analyzeEntryPoint(func::FuncOp funcOp) {
               "not match anything, so there is no kernel to serialize";
   }
 
-  for (auto [i, operand] : llvm::enumerate(entry.matvecOp->getOperands())) {
-    auto loadOp = operand.getDefiningOp<IREE::TensorExt::DispatchTensorLoadOp>();
-    if (!loadOp) {
-      return entry.matvecOp.emitOpError()
-             << "operand is not loaded directly from a dispatch binding; the "
-                "kernel would need a computation STRELA cannot perform";
+  // The job is all the dispatch does: anything else that writes or allocates
+  // memory (a copy bufferization left, a fill the kernel did not absorb) would
+  // be silently dropped.
+  WalkResult walk = funcOp.walk([&](MemoryEffectOpInterface op) {
+    if (op == entry.matvecOp) return WalkResult::advance();
+    if (op.hasEffect<MemoryEffects::Write>() ||
+        op.hasEffect<MemoryEffects::Allocate>()) {
+      op->emitOpError("writes memory besides the STRELA kernel; a STRELA "
+                      "dispatch runs nothing but its job");
+      return WalkResult::interrupt();
     }
-    FailureOr<KernelTensor> tensor = matchKernelTensor(
-      loadOp, loadOp.getSource(), loadOp.getMixedOffsets(),
-      loadOp.getMixedSizes(), loadOp.getMixedStrides()
-    );
+    return WalkResult::advance();
+  });
+  if (walk.wasInterrupted()) return failure();
+
+  // Lhs, Rhs and Result, in KernelColumn::Operand order.
+  for (auto [i, operand] : llvm::enumerate(entry.matvecOp->getOperands())) {
+    FailureOr<KernelTensor> tensor = matchKernelTensor(entry.matvecOp, operand);
     if (failed(tensor)) return failure();
     entry.tensors[i] = *tensor;
   }
-
-  Value result = entry.matvecOp.getResult();
-  if (!result.hasOneUse()) {
-    return entry.matvecOp.emitOpError()
-           << "result must be stored to a binding exactly once";
-  }
-  entry.storeOp =
-    dyn_cast<IREE::TensorExt::DispatchTensorStoreOp>(*result.user_begin());
-  if (!entry.storeOp) {
-    return entry.matvecOp.emitOpError()
-           << "result is consumed by something other than a dispatch store";
-  }
-  FailureOr<KernelTensor> tensor = matchKernelTensor(
-    entry.storeOp, entry.storeOp.getTarget(), entry.storeOp.getMixedOffsets(),
-    entry.storeOp.getMixedSizes(), entry.storeOp.getMixedStrides()
-  );
-  if (failed(tensor)) return failure();
-  entry.tensors[KernelColumn::Result] = *tensor;
   return entry;
 }
 
@@ -233,28 +254,17 @@ public:
     : builder(builder), entry(entry),
       columnType(strela::ColumnType::get(builder.getContext())) {}
 
-  FailureOr<Value> input(const KernelColumn &column);
-  FailureOr<Value> output(const KernelColumn &column);
+  Value input(const KernelColumn &column);
+  Value output(const KernelColumn &column);
   Value unusedOutput();
 
 private:
-  // Row-major element strides of a tensor whose last dimension is static.
-  FailureOr<std::array<int64_t, 2>> strides(KernelTensor &tensor);
-  Value address(KernelTensor &tensor, const KernelColumn &column,
-                std::array<int64_t, 2> strides);
+  Value address(KernelTensor &tensor, const KernelColumn &column);
 
   OpBuilder &builder;
   StrelaEntryPoint &entry;
   Type columnType;
 };
-
-FailureOr<std::array<int64_t, 2>>
-ColumnBuilder::strides(KernelTensor &tensor) {
-  if (ShapedType::isDynamic(tensor.shape[1])) {
-    return tensor.op->emitOpError("needs a static row length");
-  }
-  return std::array<int64_t, 2>{tensor.shape[1], 1};
-}
 
 // The byte offset of the binding plus
 //   word * sum_i (tile offset_i + start_i) * stride_i
@@ -263,12 +273,9 @@ ColumnBuilder::strides(KernelTensor &tensor) {
 // foldColumnAddress takes it apart again: the push constant and the constants
 // into `offset + delta`, the workgroup ids into the workgroup terms.
 Value
-ColumnBuilder::address(
-  KernelTensor &tensor, const KernelColumn &column,
-  std::array<int64_t, 2> strides
-) {
+ColumnBuilder::address(KernelTensor &tensor, const KernelColumn &column) {
   MLIRContext *context = builder.getContext();
-  Location loc = tensor.op->getLoc();
+  Location loc = tensor.tileOp->getLoc();
   Value byteOffset = tensor.binding.getByteOffset();
   SmallVector<OpFoldResult> operands = {
     byteOffset ? OpFoldResult(byteOffset) : builder.getIndexAttr(0)
@@ -276,7 +283,7 @@ ColumnBuilder::address(
   AffineExpr expr = getAffineSymbolExpr(0, context);
   for (int i = 0; i < 2; ++i) {
     expr = expr + (getAffineSymbolExpr(i + 1, context) + column.start[i]) *
-                    (word * strides[i]);
+                    (word * tensor.strides[i]);
     operands.push_back(tensor.offsets[i]);
   }
   AffineMap map = AffineMap::get(0, operands.size(), expr);
@@ -285,37 +292,33 @@ ColumnBuilder::address(
   return getValueOrCreateConstantIndexOp(builder, loc, result);
 }
 
-FailureOr<Value>
+Value
 ColumnBuilder::input(const KernelColumn &column) {
   KernelTensor &tensor = entry.tensors[column.operand];
-  FailureOr<std::array<int64_t, 2>> s = strides(tensor);
-  if (failed(s)) return failure();
   unsigned walk = *column.walk;
   return strela::InpColumnOp::create(
-           builder, tensor.op->getLoc(), columnType,
+           builder, tensor.tileOp->getLoc(), columnType,
            builder.getI32IntegerAttr(tensor.binding.getOrdinal()),
-           address(tensor, column, *s),
+           address(tensor, column),
            builder.getI32IntegerAttr(tensor.sizes[walk]),
-           builder.getI32IntegerAttr((*s)[walk])
+           builder.getI32IntegerAttr(tensor.strides[walk])
   ).getResult();
 }
 
-FailureOr<Value>
+Value
 ColumnBuilder::output(const KernelColumn &column) {
   KernelTensor &tensor = entry.tensors[column.operand];
-  FailureOr<std::array<int64_t, 2>> s = strides(tensor);
-  if (failed(s)) return failure();
   return strela::OutColumnOp::create(
-           builder, tensor.op->getLoc(), columnType,
+           builder, tensor.tileOp->getLoc(), columnType,
            builder.getI32IntegerAttr(tensor.binding.getOrdinal()),
-           address(tensor, column, *s), builder.getI32IntegerAttr(1)
+           address(tensor, column), builder.getI32IntegerAttr(1)
   ).getResult();
 }
 
 Value
 ColumnBuilder::unusedOutput() {
   return strela::OutColumnOp::create(
-           builder, entry.storeOp.getLoc(), columnType, IntegerAttr(), Value(),
+           builder, entry.matvecOp.getLoc(), columnType, IntegerAttr(), Value(),
            IntegerAttr()
   ).getResult();
 }
@@ -340,8 +343,8 @@ buildMatvecJob(
            << "; other fabrics need the mapper";
   }
   bool transposed = matvecOp.getTransposeRhs();
-  auto lhsType = cast<RankedTensorType>(matvecOp.getLhs().getType());
-  auto rhsType = cast<RankedTensorType>(matvecOp.getRhs().getType());
+  auto lhsType = cast<MemRefType>(matvecOp.getLhs().getType());
+  auto rhsType = cast<MemRefType>(matvecOp.getRhs().getType());
   if (!lhsType.hasStaticShape() || !rhsType.hasStaticShape() ||
       lhsType.getDimSize(0) != 1 ||
       rhsType.getDimSize(transposed ? 0 : 1) != strelaMatvecFeaturesPerJob) {
@@ -352,9 +355,9 @@ buildMatvecJob(
   int64_t c = rhsType.getDimSize(transposed ? 1 : 0);
   // A weight column is C words: contiguous for F x C weights, a row of the
   // whole C x F weights apart otherwise.
-  int64_t rowLength = entry.tensors[KernelColumn::Rhs].shape[1];
+  int64_t rowLength = entry.tensors[KernelColumn::Rhs].strides[0];
   int64_t span = transposed ? c : c * rowLength;
-  if (ShapedType::isDynamic(rowLength) || span > desc.getMaxColumnWords()) {
+  if (span > desc.getMaxColumnWords()) {
     return matvecOp.emitOpError("needs a weight column of at most ")
            << desc.getMaxColumnWords() << " words, the span a STRELA column "
            << "can cover, got " << span;
@@ -364,32 +367,25 @@ buildMatvecJob(
   estela::KernelColumns table = matvecColumns(transposed);
   SmallVector<Value> inputs, outputs;
   for (const std::optional<KernelColumn> &column : table.inputs) {
-    FailureOr<Value> value = columns.input(*column);
-    if (failed(value)) return failure();
-    inputs.push_back(*value);
+    inputs.push_back(columns.input(*column));
   }
   for (const std::optional<KernelColumn> &column : table.outputs) {
-    if (!column) {
-      outputs.push_back(columns.unusedOutput());
-      continue;
-    }
-    FailureOr<Value> value = columns.output(*column);
-    if (failed(value)) return failure();
-    outputs.push_back(*value);
+    outputs.push_back(column ? columns.output(*column) : columns.unusedOutput());
   }
 
   auto bitstream = matvecBitstream(static_cast<uint16_t>(c));
   SmallVector<int32_t> words(bitstream.begin(), bitstream.end());
   strela::JobOp::create(
-    builder, entry.storeOp.getLoc(), builder.getDenseI32ArrayAttr(words),
+    builder, matvecOp.getLoc(), builder.getDenseI32ArrayAttr(words),
     inputs, outputs
   );
   return success();
 }
 
 // Replaces the dispatch interface of a STRELA kernel with its strela.*
-// counterparts, then the kernel, its loads and its store with one strela.job
-// whose column addresses are SSA index arithmetic on the push constants.
+// counterparts, then the kernel and the tiles it reads and writes with one
+// strela.job whose column addresses are SSA index arithmetic on the push
+// constants.
 struct ConvertToStrelaABIPass final
     : estela::impl::ConvertToStrelaABIPassBase<ConvertToStrelaABIPass> {
   void runOnOperation() override {
@@ -399,15 +395,14 @@ struct ConvertToStrelaABIPass final
     FailureOr<StrelaEntryPoint> entry = analyzeEntryPoint(funcOp);
     if (failed(entry)) return signalPassFailure();
 
-    OpBuilder builder(entry->storeOp);
+    OpBuilder builder(entry->matvecOp);
     strela::TargetDescAttr desc = estela::findStrelaTargetDesc(funcOp);
     if (failed(buildMatvecJob(builder, *entry, desc))) {
       return signalPassFailure();
     }
-    entry->storeOp->erase();
     entry->matvecOp->erase();
 
-    // The loads and the bindings are now unused, and so is whatever computed
+    // The tiles and the bindings are now unused, and so is whatever computed
     // only their sizes. Erase in reverse so consumers go before producers.
     SmallVector<Operation *> ops;
     for (Operation &op : funcOp.getOps()) ops.push_back(&op);

@@ -18,8 +18,14 @@ struct StrelaMatvecShape {
   bool weightsTransposed = false;
 };
 
+// The zero linalg.fill `op`'s init comes from, or null: on tensors the op that
+// defines the init, on buffers the op right before, writing the same memref.
+linalg::FillOp findZeroFill(linalg::LinalgOp op);
+
 // The shape the matvec kernel runs `op` with on the hardware `desc` describes,
 // or failure when it cannot run it. Failure for every op when `desc` is null.
+// `op` may be on tensors (the frontend, the lowering strategy) or on buffers
+// (ConvertLinalgToStrela, after bufferization).
 // With `asIfTransposed` the size limit is checked as if the weights were
 // already F x C, as IREE's TransposeMatmul makes them after
 // StrelaWidenOperands. With `asIfWidened` the inputs may be integers narrower

@@ -31,6 +31,26 @@ filterBatchDims(ArrayRef<AffineExpr> mapResults, ArrayRef<unsigned> batch) {
   return dims;
 }
 
+linalg::FillOp
+findZeroFill(linalg::LinalgOp op) {
+  Value init = op.getDpsInits()[0];
+  linalg::FillOp fillOp;
+  if (isa<RankedTensorType>(init.getType())) {
+    fillOp = init.getDefiningOp<linalg::FillOp>();
+  } else {
+    // On buffers the fill writes the same memref right before: nothing in
+    // between can read or change what it wrote.
+    fillOp = dyn_cast_or_null<linalg::FillOp>(op->getPrevNode());
+    if (fillOp && fillOp.getDpsInits()[0] != init) fillOp = {};
+  }
+  APInt value;
+  if (!fillOp || !matchPattern(fillOp.getInputs()[0], m_ConstantInt(&value))
+      || !value.isZero()) {
+    return {};
+  }
+  return fillOp;
+}
+
 // Contraction naming. linalg::inferContractionDims sorts every loop dimension
 // by which operands it appears in:
 //
@@ -53,7 +73,9 @@ matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc,
       || desc.getColumns() != strelaKernelColumns) {
     return failure();
   }
-  if (!op.hasPureTensorSemantics()) return failure();
+  if (!op.hasPureTensorSemantics() && !op.hasPureBufferSemantics()) {
+    return failure();
+  }
 
   FailureOr<linalg::ContractionDimensions> dims = matchContraction(op);
   if (failed(dims)) return failure();
@@ -116,14 +138,8 @@ matchStrelaContraction(linalg::LinalgOp op, strela::TargetDescAttr desc,
     return failure();
   }
 
-  // TODO: Put in a utility function.
   // The kernel has no accumulator input, so it can only compute from 0.
-  auto fillOp = op.getDpsInits()[0].getDefiningOp<linalg::FillOp>();
-  APInt init;
-  if (!fillOp || !matchPattern(fillOp.getInputs()[0], m_ConstantInt(&init))
-      || !init.isZero()) {
-    return failure();
-  }
+  if (!findZeroFill(op)) return failure();
 
   // N is the M dim's size, dynamic or not, or 1 when M is empty.
   int64_t rows = dims->m.empty() ? 1 : ranges[dims->m[0]];

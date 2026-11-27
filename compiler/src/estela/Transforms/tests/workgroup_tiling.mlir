@@ -1,14 +1,15 @@
 // RUN: iree-opt --iree-plugin=estela --split-input-file --mlir-print-local-scope \
-// RUN:   --pass-pipeline='builtin.module(hal.executable(hal.executable.variant(builtin.module(func.func(iree-codegen-tile-and-distribute-to-workgroups-using-forall-op, iree-strela-store-workgroup-tiles), iree-codegen-reconcile-translation-info{distribute-along=y}, iree-codegen-resolve-workgroup-count-hints, func.func(canonicalize, cse, iree-strela-overlap-last-tile, canonicalize, cse)), iree-codegen-propagate-dispatch-config)))' \
+// RUN:   --pass-pipeline='builtin.module(hal.executable(hal.executable.variant(builtin.module(func.func(iree-codegen-tile-and-distribute-to-workgroups-using-forall-op, iree-eliminate-empty-tensors, empty-tensor-to-alloc-tensor, iree-codegen-iree-comprehensive-bufferize, iree-codegen-inject-assume-alignment, resolve-shaped-type-result-dims, iree-codegen-canonicalize, cse, iree-codegen-canonicalize, iree-codegen-cleanup-buffer-alloc-view), iree-codegen-reconcile-translation-info{distribute-along=y}, iree-codegen-resolve-workgroup-count-hints, func.func(canonicalize, cse, iree-strela-overlap-last-tile, canonicalize, cse)), iree-codegen-propagate-dispatch-config)))' \
 // RUN:   %s | FileCheck %s
 
 // The tiling half of the STRELA translation pipeline, on what
 // iree-strela-select-lowering-strategy leaves: an N x C times C x F
 // linalg.matmul tiled by one row and three features. IREE distributes the
-// tiles to workgroups; iree-strela-store-workgroup-tiles stores each tile
-// (and loads each input tile) from inside the forall, so that
-// ReconcileTranslationInfo can turn it into workgroup ids while the dispatch
-// is on tensors; iree-strela-overlap-last-tile makes every tile whole.
+// tiles to workgroups; bufferization (the passes of
+// addIREEComprehensiveBufferizePasses) makes each tile subviews of the
+// bindings and the forall result-less, so that ReconcileTranslationInfo can
+// turn it into workgroup ids; iree-strela-overlap-last-tile makes every tile
+// whole. Nothing is allocated: every buffer is a binding.
 //
 // C = 16, F = 8, N dynamic: the grid is (ceildiv(8, 3), N, 1) = (3, N, 1).
 // Workgroup (x, y) computes row y, features f0 = 3x clamped to F - 3 = 5: the
@@ -22,11 +23,14 @@
 // CHECK:       func.func @tail()
 // CHECK-DAG:     %[[WG_Y:.+]] = hal.interface.workgroup.id[1] : index
 // CHECK-DAG:     %[[WG_X:.+]] = hal.interface.workgroup.id[0] : index
-// CHECK:         %[[ROW:.+]] = iree_tensor_ext.dispatch.tensor.load %{{.+}}, offsets = [%[[WG_Y]], 0], sizes = [1, 16], strides = [1, 1] {{.+}} -> tensor<1x16xi32>
+// CHECK-NOT:     memref.alloc
+// CHECK:         %[[ROW:.+]] = memref.subview %{{.+}}[%[[WG_Y]], 0] [1, 16] [1, 1] : {{.+}} to memref<1x16xi32, strided<[16, 1], offset: ?>, {{.+}}>
 // CHECK:         %[[F0:.+]] = affine.min affine_map<()[s0] -> (5, s0 * 3)>()[%[[WG_X]]]
-// CHECK:         %[[W:.+]] = iree_tensor_ext.dispatch.tensor.load %{{.+}}, offsets = [0, %[[F0]]], sizes = [16, 3], strides = [1, 1] {{.+}} -> tensor<16x3xi32>
-// CHECK:         %[[Y:.+]] = linalg.matmul ins(%[[ROW]], %[[W]] : tensor<1x16xi32>, tensor<16x3xi32>)
-// CHECK:         iree_tensor_ext.dispatch.tensor.store %[[Y]], %{{.+}}, offsets = [%[[WG_Y]], %[[F0]]], sizes = [1, 3], strides = [1, 1]
+// CHECK:         %[[W:.+]] = memref.subview %{{.+}}[0, %[[F0]]] [16, 3] [1, 1] : {{.+}} to memref<16x3xi32, strided<[8, 1], offset: ?>, {{.+}}>
+// CHECK:         %[[Y:.+]] = memref.subview %{{.+}}[%[[WG_Y]], %[[F0]]] [1, 3] [1, 1] : {{.+}} to memref<1x3xi32, strided<[8, 1], offset: ?>, {{.+}}>
+// CHECK-NEXT:    linalg.fill ins(%{{.+}} : i32) outs(%[[Y]] :
+// CHECK-NEXT:    linalg.matmul ins(%[[ROW]], %[[W]] : {{.+}}) outs(%[[Y]] :
+// CHECK-NEXT:    return
 #layout = #hal.pipeline.layout<constants = 1, bindings = [
   #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
   #hal.pipeline.binding<storage_buffer, Indirect>
@@ -80,8 +84,8 @@ hal.executable private @tail {
 // CHECK-DAG:     %[[WG_X:.+]] = hal.interface.workgroup.id[0] : index
 // CHECK-NOT:     affine.min
 // CHECK:         %[[F0:.+]] = affine.apply affine_map<()[s0] -> (s0 * 3)>()[%[[WG_X]]]
-// CHECK:         iree_tensor_ext.dispatch.tensor.load %{{.+}}, offsets = [0, %[[F0]]], sizes = [16, 3]
-// CHECK:         iree_tensor_ext.dispatch.tensor.store %{{.+}}, offsets = [%{{.+}}, %[[F0]]], sizes = [1, 3]
+// CHECK:         memref.subview %{{.+}}[0, %[[F0]]] [16, 3]
+// CHECK:         memref.subview %{{.+}}[%{{.+}}, %[[F0]]] [1, 3]
 #layout = #hal.pipeline.layout<bindings = [
   #hal.pipeline.binding<storage_buffer, "ReadOnly|Indirect">,
   #hal.pipeline.binding<storage_buffer, Indirect>

@@ -7,24 +7,29 @@ include "StrelaAttrs.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"  // SameOperandsAndResultType
 include "mlir/Interfaces/SideEffectInterfaces.td"  // Pure
 
-def MatvecOp : Strela_Op<"matvec", [Pure]> {
-  let summary = "Matrix multiplication with a zero accumulator";
+def MatvecOp : Strela_Op<"matvec"> {
+  let summary = "Matrix multiplication with a zero accumulator, on buffers";
   let description = [{
-    `result[n, f] = sum_c lhs[n, c] * rhs[c, f]`, i.e. a `linalg.matmul` whose
-    init is a zero fill. With `transpose_rhs` the weights are F x C,
-    `result[n, f] = sum_c lhs[n, c] * rhs[f, c]`, so each feature's weights
-    are contiguous.
+    `out[n, f] = sum_c lhs[n, c] * rhs[c, f]`, i.e. a `linalg.matmul` on
+    buffers whose output was zero filled. With `transpose_rhs` the weights are
+    F x C, `out[n, f] = sum_c lhs[n, c] * rhs[f, c]`, so each feature's weights
+    are contiguous. It overwrites `out` without reading it: the kernel computes
+    from zero.
 
     ```mlir
-    %0 = strela.matvec %x, %w : tensor<?x16xi32>, tensor<16x8xi32> -> tensor<?x8xi32>
-    %1 = strela.matvec %x, %wt transpose_rhs : tensor<?x16xi32>, tensor<8x16xi32> -> tensor<?x8xi32>
+    strela.matvec ins(%x, %w : memref<1x16xi32>, memref<16x3xi32>) outs(%y : memref<1x3xi32>)
+    strela.matvec ins(%x, %wt : memref<1x16xi32>, memref<3x16xi32>) outs(%y : memref<1x3xi32>) transpose_rhs
     ```
   }];
-  let arguments = (ins I32Tensor:$lhs, I32Tensor:$rhs, UnitAttr:$transpose_rhs);
-  let results = (outs I32Tensor:$result);
+  let arguments = (ins
+    Arg<MemRefOf<[I32]>, "", [MemRead]>:$lhs,
+    Arg<MemRefOf<[I32]>, "", [MemRead]>:$rhs,
+    Arg<MemRefOf<[I32]>, "", [MemWrite]>:$out,
+    UnitAttr:$transpose_rhs
+  );
   let assemblyFormat = [{
-    $lhs `,` $rhs (`transpose_rhs` $transpose_rhs^)? attr-dict `:` type($lhs) `,`
-    type($rhs) `->` type($result)
+    `ins` `(` $lhs `,` $rhs `:` type($lhs) `,` type($rhs) `)`
+    `outs` `(` $out `:` type($out) `)` (`transpose_rhs` $transpose_rhs^)? attr-dict
   }];
   let hasVerifier = 1;
 }
@@ -72,16 +77,16 @@ def WorkgroupIdOp : Strela_Op<"workgroup_id", [Pure]> {
 }
 
 def BindingOp : Strela_Op<"binding", [Pure, AttrSizedOperandSegments]> {
-  let summary = "A tensor in a dispatch binding";
+  let summary = "A buffer in a dispatch binding";
   let description = [{
-    The counterpart of `hal.interface.binding.subspan`: the tensor starting
+    The counterpart of `hal.interface.binding.subspan`: the buffer starting
     `byte_offset` bytes into binding `ordinal`. It keeps the subspan's result
-    type, so the `dispatch.tensor.load/store`s on it work unchanged until
+    type, so the subviews of it each job reads and writes work unchanged until
     ConvertToStrelaABI turns them into columns, whose addresses start from
     `byte_offset`. After that it is dead.
 
     ```mlir
-    %0 = strela.binding 0 offset(%off) : !iree_tensor_ext.dispatch.tensor<readonly:tensor<?x16xi32>>{%n}
+    %0 = strela.binding 0 offset(%off) : memref<?x16xi32, strided<[16, 1], offset: ?>, #hal.descriptor_type<storage_buffer>>{%n}
     ```
   }];
   let arguments = (ins

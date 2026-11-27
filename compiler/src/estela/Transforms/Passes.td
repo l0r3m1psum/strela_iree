@@ -67,35 +67,17 @@ def StrelaSelectLoweringStrategyPass
 // STRELA executable translation
 //===----------------------------------------------------------------------===//
 
-def StrelaStoreWorkgroupTilesPass
-    : Pass<"iree-strela-store-workgroup-tiles", "mlir::func::FuncOp"> {
-  let summary = "Stores and loads the tiles of the workgroup forall one by one";
-  let description = [{
-    After TileAndDistributeToWorkgroupsUsingForallOp the workgroup scf.forall
-    returns the tiles and the dispatch stores them whole. Each tile is stored
-    from inside the forall instead (a dispatch.tensor.store where its
-    tensor.parallel_insert_slice wrote), so that ReconcileTranslationInfo,
-    which resolves only foralls without results, can turn the forall into
-    workgroup ids while the dispatch is still on tensors. Likewise every tile
-    cut from a whole-tensor load becomes a load of just the tile.
-  }];
-  let dependentDialects = [
-    "mlir::iree_compiler::IREE::TensorExt::IREETensorExtDialect",
-    "mlir::scf::SCFDialect",
-  ];
-}
-
 def StrelaOverlapLastTilePass
     : Pass<"iree-strela-overlap-last-tile", "mlir::func::FuncOp"> {
   let summary = "Shifts the smaller last tile back so every job is full";
   let description = [{
     IREE tiles F by 3 with offset 3·id and size min(3, F - 3·id); the matvec
-    bitstream only runs whole tiles. Every dispatch.tensor.load/store whose
-    size along a dimension is that clamp gets offset min(3·id, F - 3) and size
-    3 instead: when 3 does not divide F the last job overlaps the one before
-    it, rewriting the same values. The clamp is recognized by its arithmetic
-    (size + offset = F), not by its spelling. Runs after
-    ReconcileTranslationInfo, on plain stores.
+    bitstream only runs whole tiles. Every memref.subview whose size along a
+    dimension is that clamp gets offset min(3·id, F - 3) and size 3 instead:
+    when 3 does not divide F the last job overlaps the one before it,
+    rewriting the same values. The clamp is recognized by its arithmetic
+    (size + offset = F), not by its spelling. Runs after bufferization and
+    ReconcileTranslationInfo.
   }];
   let dependentDialects = [
     "mlir::affine::AffineDialect",
@@ -107,7 +89,8 @@ def ConvertLinalgToStrelaPass
     : Pass<"iree-strela-convert-linalg", "mlir::func::FuncOp"> {
   let summary = "Converts linalg ops to strela backend ops";
   let description = [{
-    Replaces the linalg ops STRELA can run with strela.matvec.
+    Replaces the bufferized linalg ops STRELA can run, and the zero fills of
+    their outputs, with strela.matvec.
   }];
   let dependentDialects = ["mlir::strela::StrelaDialect"];
 }
@@ -119,10 +102,11 @@ def ConvertToStrelaABIPass
   let description = [{
     Converts the hal.interface.* ops of a dispatch to their strela.*
     counterparts one at a time (the HAL dialect is illegal afterwards), then
-    replaces the strela.matvec and the loads and store around it with one
-    strela.job: the matvec bitstream and its DMA columns, placed by the kernel's
-    column table. Each column address is SSA index arithmetic, an affine.apply
-    of the binding's byte offset and the slice offsets; the job verifier and the
+    replaces the strela.matvec and the subviews of the bindings it reads and
+    writes with one strela.job: the matvec bitstream and its DMA columns,
+    placed by the kernel's column table. Each column address is SSA index
+    arithmetic, an affine.apply of the binding's byte offset and the subview
+    offsets, scaled by the binding's strides; the job verifier and the
     serializer fold it. The workgroup terms of the grid
     ResolveWorkgroupCountPass set are still built by hand, as wg_x / wg_y on
     the columns.

@@ -20,7 +20,6 @@ iree_cc_library(
     "LinkExecutablesPass.cpp"
     "StrelaOverlapLastTilePass.cpp"
     "StrelaSelectLoweringStrategyPass.cpp"
-    "StrelaStoreWorkgroupTilesPass.cpp"
     "StrelaWidenOperandsPass.cpp"
     "TransferWrapPass.cpp"
   INCLUDES
@@ -48,6 +47,7 @@ iree_cc_library(
     MLIRLinalgDialect
     MLIRLinalgTransforms
     MLIRLinalgUtils
+    MLIRMemRefDialect
     MLIRPass
     MLIRSCFDialect
     MLIRSupport

@@ -30,36 +30,30 @@ struct ConvertLinalgMatvecToStrela
   matchAndRewrite(
     linalg::LinalgOp op, PatternRewriter &rewriter
   ) const override {
+    if (!op.hasPureBufferSemantics()) {
+      return rewriter.notifyMatchFailure(op, "not bufferized");
+    }
     FailureOr<estela::StrelaMatvecShape> shape =
       estela::matchStrelaContraction(op, desc);
     if (failed(shape)) {
       return rewriter.notifyMatchFailure(op, "not a STRELA matvec");
     }
-    int64_t n = shape->n, c = shape->c, f = shape->f;
+    // The lowering strategy made the contraction an N x C times C x F (or
+    // F x C) matmul, so the tiles are already the kernel's operands.
+    if (llvm::any_of(op->getOperands(), [](Value v) {
+          return cast<MemRefType>(v.getType()).getRank() != 2;
+        })) {
+      return rewriter.notifyMatchFailure(op, "not the kernel's 2-D operands");
+    }
 
-    // To N x C times C x F (or F x C) and back. matchStrelaContraction checked
-    // that the operands differ from these shapes only by unit dims, so every
-    // reshape exists. After the lowering strategy the tile already has the
-    // kernel's shape and nothing is reshaped.
-    Location loc = op.getLoc();
-    Type i32 = rewriter.getI32Type();
+    // The zero fill goes: the kernel computes from zero.
+    rewriter.eraseOp(estela::findZeroFill(op));
     SmallVector<Value> inputs = op.getDpsInputs();
-    bool transposed = shape->weightsTransposed;
-    Value lhs = *estela::reshapeTo(
-      rewriter, loc, inputs[0], RankedTensorType::get({n, c}, i32)
+    strela::MatvecOp::create(
+      rewriter, op.getLoc(), inputs[0], inputs[1], op.getDpsInits()[0],
+      shape->weightsTransposed ? rewriter.getUnitAttr() : UnitAttr()
     );
-    Value rhs = *estela::reshapeTo(
-      rewriter, loc, inputs[1],
-      RankedTensorType::get(transposed ? ArrayRef<int64_t>{f, c}
-                                       : ArrayRef<int64_t>{c, f}, i32)
-    );
-    // The zero fill init is dropped: the kernel computes from zero.
-    Value y = strela::MatvecOp::create(
-      rewriter, loc, RankedTensorType::get({n, f}, i32), lhs, rhs,
-      transposed ? rewriter.getUnitAttr() : UnitAttr()
-    );
-    auto resultType = cast<RankedTensorType>(op->getResult(0).getType());
-    rewriter.replaceOp(op, *estela::reshapeTo(rewriter, loc, y, resultType));
+    rewriter.eraseOp(op);
     return success();
   }
 };

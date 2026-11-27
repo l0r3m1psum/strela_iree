@@ -4,6 +4,7 @@
 #include "iree/compiler/Dialect/Stream/IR/StreamTypes.h"
 #include "iree/compiler/Utils/FlatbufferUtils.h"
 #include "iree/compiler/Codegen/Common/Passes.h"
+#include "iree/compiler/Codegen/Utils/Utils.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
@@ -172,8 +173,23 @@ StrelaTargetBackend::buildTranslationPassPipeline(
   modulePassManager.addNestedPass<func::FuncOp>(
     createTileAndDistributeToWorkgroupsUsingForallOpPass()
   );
-  modulePassManager.addNestedPass<func::FuncOp>(
-    estela::createStrelaStoreWorkgroupTilesPass()
+  // Each tile becomes subviews of the bindings, and the forall loses its
+  // results, which is what ReconcileTranslationInfo takes. Every buffer is a
+  // binding: STRELA has no memory of its own for a temporary. Bufferization
+  // copies each tile and the whole output onto themselves, copies the cleanup
+  // it runs afterwards removes; ConvertToStrelaABI rejects any that is left.
+  auto allocFn = [](
+    OpBuilder &, Location loc, MemRefType type, ValueRange, unsigned
+  ) -> FailureOr<Value> {
+    return emitError(loc)
+      << "a STRELA dispatch cannot allocate a temporary buffer, needed for " << type;
+  };
+  auto memCpyFn = [](OpBuilder &builder, Location loc, Value from, Value to) {
+    createLinalgCopyOp(builder, loc, from, to);
+    return success();
+  };
+  addIREEComprehensiveBufferizePasses(
+    modulePassManager.nest<func::FuncOp>(), allocFn, memCpyFn
   );
   // Rows and feature triples stay on workgroup ids y and x: linearizing them
   // onto x (the default) would need a div/mod a column address can't hold.

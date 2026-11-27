@@ -28,6 +28,8 @@ iree_cc_library(
     iree::..::..::compiler::src::estela::StrelaIR::IR
     iree::..::..::compiler::src::estela::Transforms::Transforms
     iree::..::..::compiler::src::estela::Utils::Utils
+    iree::compiler::Codegen::Common
+    iree::compiler::Codegen::Utils
     iree::compiler::Dialect::HAL::IR
     iree::compiler::Dialect::HAL::Target
     iree::compiler::Dialect::Stream::IR
